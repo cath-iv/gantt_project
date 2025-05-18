@@ -1,0 +1,40 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Приветствие</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'planning/css/transitions.css' %}">
+    <style>
+        .welcome-screen {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .welcome-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <div class="welcome-screen">
+        <div class="welcome-card">
+            <h1 class="mb-4">Модуль прогнозирования сроков выполнения операций</h1>
+            <p class="lead mb-4">Система календарно-сетевого планирования работ строительной площадки</p>
+
+            <p class="mb-4">Разработчик: Кожевникова Е.Г., группа КЭ-220</p>
+
+            <a href="{% url 'planner' %}" class="btn btn-primary btn-lg">
+                Перейти к планированию →
+            </a>
+        </div>
+    </div>
+</body>
+</html>

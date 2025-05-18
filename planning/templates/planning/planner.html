@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
+  <title>Планировщик</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+  <a href="/" class="btn btn-outline-secondary mb-3">На главную</a>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <style>
+    /* Ваши существующие стили остаются без изменений */
+    .form-container { display: none; }
+    #tasks-block, #progress-block { transition: all 0.3s ease; }
+    .task-card {
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 3px;
+      font-size: 0.85rem;
+    }
+    .task-card h5 {
+      color: #0d6efd;
+      margin: 0 0 3px 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .task-actions {
+      display: flex;
+      gap: 2px;
+      margin-top: 4px;
+    }
+    .task-actions .btn {
+      padding: 0.15rem 0.3rem;
+      font-size: 0.75rem;
+    }
+    .task-meta {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 3px;
+      flex-wrap: wrap;
+    }
+    .task-meta span {
+      white-space: nowrap;
+      font-size: 0.8rem;
+      color: #555;
+    }
+    #gantt-container {
+      width: 100%;
+      height: 600px;
+      overflow: auto;
+      margin-top: 20px;
+      border: 1px solid #eee;
+      border-radius: 4px;
+      padding: 10px;
+      background: white;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #gantt-svg {
+      min-width: 100%;
+      width: auto;
+      height: auto;
+      flex-grow: 1;
+    }
+    #gantt-svg .bar {
+    fill: royalblue;
+
+    .gantt-header {
+      position: sticky;
+      top: 0;
+      background: white;
+      z-index: 100;
+    }
+    .gantt-controls {
+      position: sticky;
+      top: 40px;
+      background: white;
+      z-index: 99;
+      padding: 5px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .gantt-tooltip {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      border: 1px solid #ddd;
+      font-size: 12px;
+    }
+    .gantt-tooltip h5 {
+      margin: 0 0 5px 0;
+      color: #333;
+    }
+    .gantt-tooltip p {
+      margin: 3px 0;
+    }
+    .gantt-controls button {
+      margin-right: 5px;
+      width: 30px;
+    }
+    .gantt-controls select {
+      display: inline-block;
+      width: auto;
+      margin-left: 10px;
+    }
+    #gantt-container::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    #gantt-container::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 5px;
+    }
+    #gantt-container::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+    @media (max-width: 768px) {
+      #gantt-container {
+        height: 400px;
+      }
+    }
+
+    /* Стили для графика прогресса */
+    #progress-chart-container {
+      height: 400px;
+      width: 100%;
+      position: relative;
+    }
+    .progress-controls {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <!-- 1. Блок проекта -->
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Проект</span>
+        <button class="btn btn-sm btn-primary" onclick="toggleProjectForm()" id="project-toggle-btn">
+          Создать новый
+        </button>
+      </div>
+      <div class="card-body">
+        <select class="form-select" id="project-select"
+                onchange="loadProjectData(this.value)">
+          <option value="">Выберите проект</option>
+          {% for project in projects %}
+            <option value="{{ project.project_id }}">{{ project.name }}</option>
+          {% endfor %}
+        </select>
+
+        <!-- Форма создания проекта -->
+        <div id="project-form" style="display:none;" class="mt-3">
+          <form id="create-project-form">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label">Название проекта*</label>
+              <input type="text" name="name" class="form-control" required>
+            </div>
+            <div class="d-flex justify-content-between">
+              <button type="button" class="btn btn-success" onclick="createProject()">Сохранить</button>
+              <button type="button" class="btn btn-secondary" onclick="toggleProjectForm()">Отмена</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Блок задач -->
+    <div class="card mb-4" id="tasks-block" style="display:none;">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Задачи проекта</span>
+        <div>
+          <button class="btn btn-sm btn-danger me-2" onclick="deleteCurrentProject()">
+            Удалить проект
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="showTaskForm()" id="task-toggle-btn">
+            Добавить задачу
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <!-- Форма создания/редактирования задачи -->
+        <div id="task-form-container" style="display:none;" class="mb-4">
+          <form id="task-form">
+            {% csrf_token %}
+            <input type="hidden" name="project_id" id="task-project-id">
+            <input type="hidden" name="task_id" id="edit-task-id">
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Описание*</label>
+                <input type="text" name="description" class="form-control" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Тип работы*</label>
+                <select name="work_type" class="form-select" required id="work-type-select">
+                  <option value="">Выберите тип</option>
+                  {% for value, label in work_type_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Длительность (дни)*</label>
+                <input type="number" name="estimated_duration" class="form-control" min="1" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Дата начала*</label>
+                <input type="date" name="start_date" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Дата окончания*</label>
+                <input type="date" name="end_date" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Ресурс*</label>
+                <select name="resource_id" class="form-select" required id="resource-select">
+                  <option value="">Выберите ресурс</option>
+                  {% for resource in resources %}
+                    <option value="{{ resource.resource_id }}" data-unit="{{ resource.unit }}">
+                      {{ resource.get_type_display }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Плановое количество*</label>
+                <input type="number" name="planned_amount" class="form-control" min="0.01" step="0.01" required>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Единица измерения</label>
+                <input type="text" id="resource-unit" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Зависит от</label>
+                <select name="dependency" class="form-select" id="dependency-select">
+                  <option value="">Нет</option>
+                </select>
+              </div>
+
+              <div class="col-12 d-flex justify-content-between">
+                <button type="button" class="btn btn-success" onclick="saveTask()">Сохранить</button>
+                <button type="button" class="btn btn-secondary" onclick="hideTaskForm()">Отмена</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Список задач -->
+        <div id="tasks-list" class="mt-3">
+          <!-- Задачи будут загружаться здесь -->
+        </div>
+
+        <!-- Диаграмма Ганта -->
+        <div id="gantt-container" class="mt-3"></div>
+      </div>
+    </div>
+
+    <!-- Блок ежедневного выполнения -->
+    <div class="card mb-4" id="progress-block" style="display:none;">
+      <div class="card-header">Ежедневное выполнение</div>
+      <div class="card-body">
+        <form id="progress-form">
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label">Дата</label>
+              <input type="date" class="form-control" id="progress-date" required onchange="loadWeather(this.value)">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Задача</label>
+              <select class="form-select" id="progress-task" required onchange="updateTaskResourceInfo(this)">
+                <option value="">Выберите задачу</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Ресурс</label>
+              <input type="text" id="progress-resource" class="form-control" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">План</label>
+              <input type="text" id="progress-planned" class="form-control" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Остаток</label>
+              <input type="text" id="progress-remains" class="form-control" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Выполнено*</label>
+              <input type="number" class="form-control" min="0" step="0.01"
+                     id="progress-value" required>
+            </div>
+            <div class="col-12">
+              <div id="weather-info" class="alert alert-info"></div>
+            </div>
+            <div class="col-12">
+              <button type="button" class="btn btn-primary" onclick="saveProgress()">Сохранить</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Прогнозирование -->
+    <!-- Блок прогнозирования - модифицируем существующий -->
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Прогнозирование</span>
+        <button class="btn btn-sm btn-primary" onclick="toggleModelForm()">
+          Новый профиль прогнозирования
+        </button>
+      </div>
+      <div class="card-body">
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <select class="form-select" id="model-select" onchange="loadModelDetails(this.value)">
+              <option value="">Выберите профиль</option>
+              {% for model in models %}
+              <option value="{{ model.id }}">{{ model.profile_name}}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <button class="btn btn-outline-primary w-100" onclick="trainSelectedModel()">
+              Обучить модель
+            </button>
+          </div>
+        </div>
+
+        <!-- Форма создания модели -->
+        <div id="model-form" style="display:none;" class="mt-3">
+          <form id="create-model-form" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Название профиля*</label>
+                <input type="text" name="profile_name" class="form-control" required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Тип модели*</label>
+                <select name="name_neural" class="form-select" required>
+                  <option value="lstm">Модель LSTM (baseline)</option>
+                  <!--<option value="linear">Linear Regression</option>-->
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Количество эпох*</label>
+                <input type="number" name="num_epoch" class="form-control" min="1" value="15" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Размер батча*</label>
+                <input type="number" name="batch_size" class="form-control" min="1" value="32" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Горизонт прогноза (дни)*</label>
+                <input type="number" name="slide_window" class="form-control" min="1" value="7" required>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Данные для обучения</label>
+                <div class="mb-2">
+                  <label class="form-label small">Данные проекта (Excel)</label>
+                  <input type="file" name="project_file" class="form-control" accept=".xlsx" required>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">Данные персонала (Excel)</label>
+                  <input type="file" name="staff_file" class="form-control" accept=".xlsx" required>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small">Данные погоды (Excel)</label>
+                  <input type="file" name="weather_file" class="form-control" accept=".xlsx" required>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex justify-content-between">
+              <button type="button" class="btn btn-success" onclick="createModel()">Сохранить модель</button>
+              <button type="button" class="btn btn-primary" onclick="trainSelectedModel()">Обучить модель</button>
+              <button type="button" class="btn btn-secondary" onclick="toggleModelForm()">Отмена</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Детали модели -->
+        <div id="model-details" class="mt-3"></div>
+
+        <!-- Блок прогнозирования -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>Профиль прогнозирования</h5>
+      </div>
+      <div class="card-body">
+        <form id="model-form" enctype="multipart/form-data">
+          {% csrf_token %}
+          <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label">Название профиля*</label>
+                <input type="text" name="profile_name" class="form-control" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Архитектура модели*</label>
+                <select name="name_neural" class="form-select" required>
+                  <option value="lstm">LSTM (baseline)</option>
+                </select>
+              </div>
+
+              <label class="form-label">Параметры модели*</label>
+
+              <div class="col-md-4">
+                <label class="form-label">Эпох обучения*</label>
+                <input type="number" name="num_epoch" class="form-control" min="1" value="15" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Размер батча*</label>
+                <input type="number" name="batch_size" class="form-control" min="1" value="14" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Горизонт прогнозирования*</label>
+                <input type="number" name="slide_window" class="form-control" min="1" value="7" required>
+              </div>
+
+
+
+            <div class="col-12">
+              <label class="form-label">Данные для обучения*</label>
+              <div class="mb-2">
+                <input type="file" name="project_file" class="form-control" accept=".xlsx" required>
+                <small class="text-muted">Данные проекта (.xlsx)</small>
+              </div>
+              <div class="mb-2">
+                <input type="file" name="staff_file" class="form-control" accept=".xlsx" required>
+                <small class="text-muted">Данные персонала (.xlsx)</small>
+              </div>
+              <div class="mb-2">
+                <input type="file" name="weather_file" class="form-control" accept=".xlsx" required>
+                <small class="text-muted">Данные погоды (.xlsx)</small>
+              </div>
+            </div>
+          </div>
+
+          <div id="model-status" class="model-status status-not-trained">
+            <div id="status-text">Модель не обучена</div>
+            <div id="training-progress">
+              <div class="progress mt-2">
+                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar" style="width: 0%">0%</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-grid gap-2">
+            <button type="button" class="btn btn-primary" onclick="createAndTrainModel()">
+              Создать и обучить модель
+            </button>
+            <button type="button" class="btn btn-success" onclick="makePrediction()"
+                    id="predict-btn" style="display: none;">
+              Получить прогноз
+            </button>
+          </div>
+        </form>
+
+        </div>
+    </div>
+      </div>
+    </div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>График строительной готовности</span>
+      <div class="btn-group progress-controls">
+        <button class="btn btn-sm btn-outline-secondary" id="zoom-in-progress">+</button>
+        <button class="btn btn-sm btn-outline-secondary" id="zoom-out-progress">-</button>
+        <select class="form-select form-select-sm" id="time-range-select">
+          <option value="all">Весь период</option>
+          <option value="month">1 месяц</option>
+        <!--  <option value="week">1 неделя</option> -->
+          <option value="7days">7 дней</option>
+        </select>
+      </div>
+    </div>
+    <div class="card-body">
+      <div id="progress-chart-container">
+        <canvas id="progress-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Глобальные переменные для графика
+    let progressChart = null;
+    let allProgressData = [];
+    let predictedData = [];
+
+
+    // Инициализация Chart.js с адаптером дат
+    function initializeChartJS() {
+      // Регистрируем необходимые компоненты
+      Chart.register(
+        ChartZoom, // Плагин масштабирования
+        {
+          id: 'date_adapter',
+          beforeInit: function(chart) {
+            if (chart.options.scales && chart.options.scales.x && chart.options.scales.x.type === 'time') {
+              chart.options.scales.x.adapters = {
+                date: {
+                  zone: 'UTC'
+                }
+              };
+            }
+          }
+        }
+      );
+    }
+
+    // Функция загрузки данных прогресса
+    function loadProgressChart() {
+      const projectId = document.getElementById('project-select').value;
+      if (!projectId) return;
+
+      fetch(`/api/projects/${projectId}/progress/`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.status === 'error') {
+            throw new Error(data.error);
+          }
+
+          allProgressData = data.progress_data || [];
+          predictedData = data.predicted || [];
+          renderProgressChart();
+        })
+        .catch(error => {
+          console.error('Error loading progress data:', error);
+          showAlert('Ошибка загрузки данных прогресса: ' + error.message, 'danger');
+
+          // Создаем пустой график для предотвращения ошибок
+          allProgressData = [];
+          predictedData = [];
+          renderProgressChart();
+        });
+    }
+
+    // Функция отрисовки графика
+    function renderProgressChart(timeRange = 'all') {
+      const ctx = document.getElementById('progress-chart');
+
+      // Уничтожаем предыдущий график, если он существует
+      if (progressChart) {
+        progressChart.destroy();
+      }
+
+      // Фильтруем данные по выбранному диапазону
+      const filteredData = filterDataByTimeRange(allProgressData, timeRange);
+      const filteredPredicted = filterDataByTimeRange(predictedData, timeRange);
+
+      progressChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'Фактическая готовность',
+              data: filteredData.map(item => ({
+                x: item.date,
+                y: item.cumulative_progress * 100
+              })),
+              borderColor: 'rgba(54, 162, 235, 1)',
+              backgroundColor: 'rgba(54, 162, 235, 0.1)',
+              borderWidth: 3,
+              tension: 0.3,
+              fill: true
+            },
+            {
+              label: 'Прогнозируемая готовность',
+              data: filteredPredicted.map(item => ({
+                x: item.date,
+                y: item.value * 100
+              })),
+              borderColor: 'rgba(54, 162, 235, 0.7)',
+              backgroundColor: 'transparent',
+              borderWidth: 2,
+              borderDash: [5, 5],
+              tension: 0.3,
+              pointRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: 'time',
+              time: {
+                unit: getTimeUnit(timeRange),
+                tooltipFormat: 'dd.MM.yyyy',
+                displayFormats: {
+                  day: 'dd.MM',
+                  week: 'dd.MM',
+                  month: 'MMM yyyy',
+                  year: 'yyyy'
+                }
+              },
+              title: {
+                display: true,
+                text: 'Дата'
+              }
+            },
+            y: {
+              min: 0,
+              max: 100,
+              title: {
+                display: true,
+                text: 'Готовность, %'
+              },
+              ticks: {
+                callback: function(value) {
+                  return value + '%';
+                }
+              }
+            }
+          },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + '%';
+                }
+              }
+            },
+            zoom: {
+              zoom: {
+                wheel: {
+                  enabled: true
+                },
+                pinch: {
+                  enabled: true
+                },
+                mode: 'x'
+              },
+              pan: {
+                enabled: true,
+                mode: 'x'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Функция определения единицы времени для оси X
+    function getTimeUnit(timeRange) {
+      switch(timeRange) {
+        case '7days': return 'day';
+        case 'week': return 'week';
+        case 'month': return 'month';
+        default: return 'year';
+      }
+    }
+
+    // Фильтрация данных по временному диапазону
+    function filterDataByTimeRange(data, timeRange) {
+      if (!data.length || timeRange === 'all') return data;
+
+      const now = new Date();
+      let cutoffDate = new Date();
+
+      switch(timeRange) {
+        case 'month':
+          cutoffDate.setMonth(now.getMonth() - 1);
+          break;
+        case 'week':
+          cutoffDate.setDate(now.getDate() - 7);
+          break;
+        case '7days':
+          // Для 7 дней показываем только последние 7 дней
+          return data.slice(-7);
+      }
+
+      return data.filter(item => {
+        const itemDate = new Date(item.date);
+        return itemDate >= cutoffDate;
+      });
+    }
+
+    // Обработчики событий
+    // Обработчики событий
+    document.getElementById('zoom-in-progress').addEventListener('click', () => {
+      if (progressChart) {
+        progressChart.options.scales.x.min = progressChart.scales.x.min * 0.9;
+        progressChart.options.scales.x.max = progressChart.scales.x.max * 0.9;
+        progressChart.update();
+      }
+    });
+
+    document.getElementById('zoom-out-progress').addEventListener('click', () => {
+      if (progressChart) {
+        progressChart.options.scales.x.min = progressChart.scales.x.min * 1.1;
+        progressChart.options.scales.x.max = progressChart.scales.x.max * 1.1;
+        progressChart.update();
+      }
+    });
+
+    document.getElementById('time-range-select').addEventListener('change', function() {
+      renderProgressChart(this.value);
+    });
+
+    // Инициализация при загрузке страницы
+    initializeChartJS();
+    document.getElementById('project-select').addEventListener('change', function() {
+      if (this.value) {
+        loadProgressChart();
+      }
+    });
+
+    // Если проект уже выбран при загрузке страницы
+    if (document.getElementById('project-select').value) {
+      loadProgressChart();
+    }
+        </script>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Обновляем информацию о ресурсе при выборе
+    document.getElementById('resource-select').addEventListener('change', function() {
+      const selectedOption = this.options[this.selectedIndex];
+      document.getElementById('resource-unit').value = selectedOption.dataset.unit || '';
+    });
+
+    // Загрузка погоды
+    async function loadWeather(date) {
+        if (!date) return;
+
+        const API_KEY = "52e8a490049077c0e70738ae4276a469";
+        const city = "Salekhard";
+        const weatherInfo = document.getElementById('weather-info');
+
+        try {
+            const response = await fetch(
+                `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${API_KEY}&units=metric&lang=ru`
+            );
+
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Проверка структуры ответа
+            if (!data.main || !data.wind) {
+                throw new Error("Некорректный ответ API");
+            }
+
+            weatherInfo.innerHTML = `
+                Погода: ${Math.round(data.main.temp)}°C,
+                Ветер: ${data.wind.speed} м/с,
+                Влажность: ${data.main.humidity}%,
+                Давление: ${Math.round(data.main.pressure * 0.75006)} мм рт.ст.
+            `;
+        } catch (error) {
+            console.error("Ошибка загрузки погоды:", error);
+            weatherInfo.innerHTML = "Не удалось загрузить погоду";
+        }
+    }
+
+    // Обновляем информацию о ресурсе задачи
+    function updateTaskResourceInfo(select) {
+        const selectedOption = select.options[select.selectedIndex];
+        if (!selectedOption || !selectedOption.value) return;
+
+        document.getElementById('progress-resource').value =
+            selectedOption.dataset.resourceType || 'Материал';
+        document.getElementById('progress-planned').value =
+            `${selectedOption.dataset.planned || 0} ${selectedOption.dataset.unit || ''}`;
+        document.getElementById('progress-remains').value =
+            `${selectedOption.dataset.remains || 0} ${selectedOption.dataset.unit || ''}`;
+    }
+
+    // Сохранение прогресса
+    function saveProgress() {
+      const formData = {
+        date: document.getElementById('progress-date').value,
+        task_id: document.getElementById('progress-task').value,
+        output: document.getElementById('progress-value').value,
+        resource_id: document.querySelector('#progress-task option:checked').dataset.resourceId,
+        csrfmiddlewaretoken: document.querySelector('[name=csrfmiddlewaretoken]').value
+      };
+
+      if (!formData.date || !formData.task_id || !formData.output) {
+        showAlert('Заполните все обязательные поля', 'warning');
+        return;
+      }
+
+      fetch('/api/progress/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': formData.csrfmiddlewaretoken
+        },
+        body: JSON.stringify(formData)
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showAlert('Прогресс сохранен!', 'success');
+          // Обновляем остаток
+          const remains = parseFloat(document.getElementById('progress-remains').value.split(' ')[0] - parseFloat(formData.output));
+          document.getElementById('progress-remains').value = remains.toFixed(2) + ' ' + document.getElementById('progress-remains').value.split(' ')[1];
+          document.getElementById('progress-value').value = '';
+        } else {
+          throw new Error(data.message || 'Ошибка сохранения');
+        }
+      })
+      .catch(error => {
+        showAlert('Ошибка: ' + error.message, 'danger');
+        console.error('Error:', error);
+      });
+    }
+
+    function toggleProjectForm() {
+      const form = document.getElementById('project-form');
+      const btn = document.getElementById('project-toggle-btn');
+      if (form.style.display === 'none') {
+        form.style.display = 'block';
+        btn.textContent = 'Скрыть форму';
+      } else {
+        form.style.display = 'none';
+        btn.textContent = 'Создать новый';
+      }
+    }
+
+    function createProject() {
+      const form = document.getElementById('create-project-form');
+      const formData = new FormData(form);
+
+      fetch('/api/projects/', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.project_id) {
+          // Добавляем новый проект в select
+          const select = document.getElementById('project-select');
+          const option = document.createElement('option');
+          option.value = data.project_id;
+          option.textContent = data.name;
+          select.appendChild(option);
+
+          toggleProjectForm();
+          showAlert('Проект успешно создан!', 'success');
+        }
+      });
+    }
+
+    function deleteCurrentProject() {
+      const projectId = document.getElementById('project-select').value;
+      if (!projectId) return;
+
+      if (confirm('Удалить проект и все его задачи?')) {
+        fetch(`/api/projects/${projectId}/`, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        })
+        .then(() => {
+          // Удаляем проект из select
+          document.querySelector(`#project-select option[value="${projectId}"]`).remove();
+          document.getElementById('project-select').value = '';
+          document.getElementById('tasks-block').style.display = 'none';
+          showAlert('Проект удален', 'info');
+        });
+      }
+    }
+
+    function showTaskForm(taskId = null) {
+      const formContainer = document.getElementById('task-form-container');
+      const form = document.getElementById('task-form');
+      const projectId = document.getElementById('project-select').value;
+
+      if (!projectId) {
+        alert('Сначала выберите проект!');
+        return;
+      }
+
+      document.getElementById('task-project-id').value = projectId;
+
+      if (taskId) {
+        // Режим редактирования
+        fetch(`/api/tasks/${taskId}/`)
+          .then(response => response.json())
+          .then(task => {
+            document.getElementById('edit-task-id').value = task.task_id;
+            form.querySelector('[name="description"]').value = task.description;
+            form.querySelector('[name="work_type"]').value = task.work_type;
+            form.querySelector('[name="estimated_duration"]').value = task.estimated_duration;
+            form.querySelector('[name="start_date"]').value = task.start_date;
+            form.querySelector('[name="end_date"]').value = task.end_date;
+            form.querySelector('[name="resource_id"]').value = task.resource_id;
+            form.querySelector('[name="planned_amount"]').value = task.planned_amount;
+            formContainer.style.display = 'block';
+
+            // Устанавливаем единицу измерения
+            const resourceSelect = document.getElementById('resource-select');
+            const selectedOption = resourceSelect.querySelector(`option[value="${task.resource_id}"]`);
+            if (selectedOption) {
+              document.getElementById('resource-unit').value = selectedOption.dataset.unit || '';
+            }
+          });
+      } else {
+        // Режим создания
+        document.getElementById('edit-task-id').value = '';
+        form.reset();
+        document.getElementById('resource-unit').value = '';
+        formContainer.style.display = 'block';
+      }
+
+      document.getElementById('task-toggle-btn').textContent = 'Скрыть форму';
+    }
+
+    function hideTaskForm() {
+      document.getElementById('task-form-container').style.display = 'none';
+      document.getElementById('task-toggle-btn').textContent = 'Добавить задачу';
+    }
+
+    function saveTask() {
+      // Проверка что дата окончания рассчитана
+      if (!document.querySelector('[name="end_date"]').value) {
+        alert('Пожалуйста, укажите дату начала и длительность');
+        return;
+      }
+
+      const form = document.getElementById('task-form');
+      const formData = new FormData(form);
+      const taskId = document.getElementById('edit-task-id').value;
+      const method = taskId ? 'PUT' : 'POST';
+      const url = taskId ? `/api/tasks/${taskId}/` : '/api/tasks/';
+
+      fetch(url, {
+        method: method,
+        body: formData,
+        headers: {
+          'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.task_id) {
+          hideTaskForm();
+          loadTasks();
+          loadGanttChart();
+          showAlert('Задача сохранена', 'success');
+        }
+      });
+    }
+
+    function deleteTask(taskId) {
+      if (confirm('Удалить задачу?')) {
+        fetch(`/api/tasks/${taskId}/`, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        })
+        .then(() => {
+          loadTasks();
+          loadGanttChart();
+          showAlert('Задача удалена', 'info');
+        });
+      }
+    }
+
+    function loadTasks() {
+      const projectId = document.getElementById('project-select').value;
+      if (!projectId) return;
+
+      fetch(`/api/projects/${projectId}/tasks/`)
+        .then(response => response.json())
+        .then(tasks => {
+          const tasksList = document.getElementById('tasks-list');
+          tasksList.innerHTML = tasks.map(task => `
+            <div class="task-card">
+              <h5>${task.description}</h5>
+              <div class="task-meta">
+                <span><strong>Тип:</strong> ${getWorkTypeDisplay(task.work_type)}</span>
+                <span><strong>Длит.:</strong> ${task.estimated_duration}д</span>
+                <span><strong>Даты:</strong> ${formatDate(task.start_date)}-${formatDate(task.end_date)}</span>
+              </div>
+              <div class="task-actions">
+                <button class="btn btn-sm btn-warning" onclick="showTaskForm(${task.task_id})">
+                  Ред.
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteTask(${task.task_id})">
+                  Удал.
+                </button>
+              </div>
+            </div>
+          `).join('');
+
+          // Обновляем список зависимостей
+          const dependencySelect = document.getElementById('dependency-select');
+          dependencySelect.innerHTML = '<option value="">Нет</option>' +
+            tasks.map(t => `<option value="${t.task_id}">${t.description}</option>`).join('');
+
+          // Обновляем список задач для прогресса
+          const progressSelect = document.getElementById('progress-task');
+          progressSelect.innerHTML = '<option value="">Выберите задачу</option>' +
+            tasks.map(t => `<option value="${t.task_id}"
+                    data-resource-id="${t.resource_id}"
+                    data-resource-type="${t.resource?.type || ''}"
+                    data-planned="${t.planned_amount}"
+                    data-remains="${t.remains}"
+                    data-unit="${t.resource?.unit || ''}">
+                ${t.description}
+            </option>`).join('');
+        });
+    }
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      // Формат: "день.месяц.год" (сокращенный год - последние 2 цифры)
+      return `${date.getDate()}.${date.getMonth()+1}.${date.getFullYear().toString().slice(-2)}`;
+    }
+
+    function getWorkTypeDisplay(workType) {
+      const types = {
+        'AT_1': 'Основные строительные конструкции',
+        'AT_2': 'Технологическое оборудование',
+        'AT_3': 'Инженерные сети',
+        'AT_4': 'Земляные работы и фундаменты',
+        'AT_5': 'Защитные покрытия',
+        'AT_6': 'Испытания и контроль',
+        'AT_7': 'Электромонтаж',
+        'AT_8': 'Сварка трубопроводов',
+        'AT_9': 'Опоры и мачты',
+        'AT_10': 'Дорожные работы',
+        'AT_11': 'Спецработы на трубопроводах',
+        'AT_12': 'Армирование и металлоконструкции',
+        'AT_13': 'Вспомогательные работы',
+        'AT_14': 'Пуско-наладочные работы',
+        'AT_15': 'Магистральные трубопроводы',
+      };
+      return types[workType] || workType;
+    }
+
+    function loadProjectData(projectId) {
+      const tasksBlock = document.getElementById('tasks-block');
+      const progressBlock = document.getElementById('progress-block');
+
+      if (projectId) {
+        tasksBlock.style.display = 'block';
+        progressBlock.style.display = 'block';
+        loadTasks();
+        loadGanttChart();
+      } else {
+        tasksBlock.style.display = 'none';
+        progressBlock.style.display = 'none';
+      }
+    }
+
+    let globalGantt = null; // Добавляем глобальную переменную для хранения экземпляра
+    let allTasks = []; // Сохраняем все задачи
+
+    function loadGanttChart() {
+      const projectId = document.getElementById('project-select').value;
+      if (!projectId) {
+        document.getElementById('gantt-container').innerHTML =
+          '<div class="alert alert-info">Выберите проект</div>';
+        return;
+      }
+
+      fetch(`/api/gantt/${projectId}/`)
+        .then(response => response.json())
+        .then(data => {
+          const container = document.getElementById('gantt-container');
+          container.innerHTML = '<svg id="gantt-svg"></svg>';
+
+          if (!data.tasks || data.tasks.length === 0) {
+            container.innerHTML = '<div class="alert alert-warning">Нет задач для отображения</div>';
+            return;
+          }
+
+          // Сохраняем все задачи
+          allTasks = data.tasks.map(task => ({
+            id: task.task_id.toString(),
+            name: task.description,
+            start: task.start_date,
+            end: task.end_date,
+            progress: task.progress || 0,
+            dependencies: data.dependencies
+              .filter(d => d.dependent_task_id === task.task_id)
+              .map(d => d.task_id.toString())
+          }));
+
+          // Создаем Гант с текущими задачами
+          createGanttInstance(allTasks);
+        })
+        .catch(error => {
+          console.error("Ошибка:", error);
+          document.getElementById('gantt-container').innerHTML =
+            `<div class="alert alert-danger">Ошибка загрузки: ${error.message}</div>`;
+        });
+    }
+
+    function createGanttInstance(tasks) {
+      const container = document.getElementById('gantt-container');
+
+      if (globalGantt) {
+        container.innerHTML = '<svg id="gantt-svg"></svg>';
+      }
+
+      const baseColumnWidth = 30;
+      const scaleFactor = Math.min(1, 1000 / tasks.length);
+      const columnWidth = Math.max(10, baseColumnWidth * scaleFactor);
+      const barHeight = Math.max(15, 20 * scaleFactor);
+
+      globalGantt = new Gantt("#gantt-svg", tasks, {
+        header_height: 50,
+        column_width: columnWidth,
+        step: 24,
+        view_mode: "Month",
+        date_format: "YYYY-MM-DD",
+        language: "ru",
+        padding: 6,
+        bar_height: barHeight,
+        bar_corner_radius: 3,
+        custom_scrollbar: true,
+        on_click: function(task) {
+          console.log("Задача выбрана:", task);
+        },
+        // Добавляем кастомный формат для tooltip
+        custom_popup_html: function(task) {
+          // Форматируем даты в нужный формат (день.месяц.год)
+          const formatDate = (dateStr) => {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('ru-RU');
+          };
+
+          return `
+            <div class="gantt-tooltip">
+              <h5>${task.name}</h5>
+              <p><strong>Сроки:</strong> ${formatDate(task.start)} - ${formatDate(task.end)}</p>
+              <p><strong>Прогресс:</strong> ${task.progress}%</p>
+            </div>
+          `;
+        }
+      });
+
+      addGanttControls();
+    }
+
+    function addGanttControls() {
+      const controls = document.createElement('div');
+      controls.className = 'gantt-controls mb-2';
+      controls.innerHTML = `
+        <button class="btn btn-sm btn-outline-primary zoom-in">+</button>
+        <button class="btn btn-sm btn-outline-primary zoom-out">-</button>
+        <span class="mx-2">Масштаб</span>
+        <select class="form-select form-select-sm view-mode" style="display: inline-block; width: auto;">
+          <option value="Day">День</option>
+          <option value="Week">Неделя</option>
+          <option value="Month">Месяц</option>
+        </select>
+      `;
+
+      document.getElementById('gantt-container').prepend(controls);
+
+      // Обработчики масштабирования
+      controls.querySelector('.zoom-in').addEventListener('click', () => {
+        globalGantt.options.column_width = Math.min(100, globalGantt.options.column_width * 1.2);
+        globalGantt.refresh(allTasks); // Обновляем со всеми задачами
+      });
+
+      controls.querySelector('.zoom-out').addEventListener('click', () => {
+        globalGantt.options.column_width = Math.max(10, globalGantt.options.column_width * 0.8);
+        globalGantt.refresh(allTasks); // Обновляем со всеми задачами
+      });
+
+      // Переключение режимов просмотра
+      controls.querySelector('.view-mode').addEventListener('change', function() {
+        globalGantt.change_view_mode(this.value);
+      });
+    }
+
+    // Автоматический расчет даты окончания
+    document.querySelector('[name="start_date"]').addEventListener('change', function() {
+      calculateEndDate();
+    });
+
+    document.querySelector('[name="estimated_duration"]').addEventListener('input', function() {
+      calculateEndDate();
+    });
+
+    function calculateEndDate() {
+      const startDateInput = document.querySelector('[name="start_date"]');
+      const durationInput = document.querySelector('[name="estimated_duration"]');
+      const endDateInput = document.querySelector('[name="end_date"]');
+
+      if (!startDateInput.value || !durationInput.value) return;
+
+      const startDate = new Date(startDateInput.value);
+      const durationDays = parseInt(durationInput.value);
+
+      if (isNaN(durationDays) || durationDays < 1) return;
+
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + durationDays);
+
+      // Форматируем дату в формат YYYY-MM-DD
+      const formattedDate = endDate.toISOString().split('T')[0];
+      endDateInput.value = formattedDate;
+    }
+
+    // Блокируем ручное редактирование даты окончания
+    document.querySelector('[name="end_date"]').addEventListener('focus', function(e) {
+      e.target.blur();
+      alert('Дата окончания рассчитывается автоматически на основе даты начала и длительности');
+    });
+
+    // Вспомогательные функции
+    function showAlert(message, type) {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type} alert-dismissible fade show`;
+      alert.role = 'alert';
+      alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      `;
+
+      const container = document.querySelector('.container');
+      container.prepend(alert);
+
+      setTimeout(() => {
+        alert.classList.remove('show');
+        setTimeout(() => alert.remove(), 150);
+      }, 3000);
+    }
+
+    // Управление моделями
+        function toggleModelForm() {
+      const form = document.getElementById('model-form');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function createModel() {
+      const form = document.getElementById('create-model-form');
+      const formData = new FormData(form);
+      const projectId = document.getElementById('project-select').value;
+
+      if (!projectId) {
+        showAlert('Сначала выберите проект!', 'warning');
+        return;
+      }
+
+      formData.append('project_id', projectId);
+
+      try {
+        const response = await fetch('/api/models/', {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showAlert('Модель успешно создана!', 'success');
+          toggleModelForm();
+          updateModelSelect(data.model_id, data.profile_name);
+        } else {
+          throw new Error(data.error || 'Ошибка создания модели');
+        }
+      } catch (error) {
+        showAlert('Ошибка: ' + error.message, 'danger');
+        console.error('Error:', error);
+      }
+    }
+
+    function updateModelSelect(modelId, profileName) {
+      const select = document.getElementById('model-select');
+      const option = document.createElement('option');
+      option.value = modelId;
+      option.textContent = profileName;
+      select.appendChild(option);
+      select.value = modelId;
+      loadModelDetails(modelId);
+    }
+
+    async function loadModelDetails(modelId) {
+      const detailsDiv = document.getElementById('model-details');
+      if (!detailsDiv) return; // Защита от ошибки
+
+      try {
+          if (!modelId) {
+              detailsDiv.innerHTML = '';
+              return;
+          }
+
+          const response = await fetch(`/api/models/${modelId}/`);
+          const model = await response.json();
+
+          detailsDiv.innerHTML = `
+              <div class="card mt-3">
+                  <div class="card-body">
+                      <h5>${model.profile_name}</h5>
+                      <p><strong>Тип:</strong> ${model.name_neural === 'lstm' ? 'LSTM' : model.name_neural}</p>
+                      <p><strong>Эпохи:</strong> ${model.num_epoch}</p>
+                      <p><strong>Батч:</strong> ${model.batch_size}</p>
+                      <p><strong>Горизонт:</strong> ${model.slide_window} дней</p>
+
+                      ${model.train_metrics ? `
+                          <div class="mt-2">
+                              <p><strong>MAE:</strong> ${model.train_metrics.test_metrics?.mae?.toFixed(2) || '-'}</p>
+                              <p><strong>MAPE:</strong> ${model.train_metrics.test_metrics?.mape?.toFixed(2) || '-'}%</p>
+                          </div>
+                      ` : '<p class="text-warning">Модель не обучена</p>'}
+
+                      <div class="d-flex justify-content-between mt-2">
+                          <button class="btn btn-sm btn-danger" onclick="deleteModel(${model.id})">
+                              Удалить
+                          </button>
+                          <button class="btn btn-sm btn-primary" onclick="makePrediction(${model.id})">
+                              Прогнозировать
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          `;
+      } catch (error) {
+          console.error('Ошибка загрузки модели:', error);
+          detailsDiv.innerHTML = '<div class="alert alert-danger">Ошибка загрузки данных модели</div>';
+      }
+  }
+
+    function getModelTypeDisplay(type) {
+      const types = {
+        'lstm': 'LSTM',
+        'linear': 'Linear Regression',
+        'gru': 'GRU'
+      };
+      return types[type] || type;
+    }
+
+    function showPredictionBlock() {
+      document.getElementById('prediction-block').style.display = 'block';
+    }
+
+    async function trainSelectedModel() {
+      const modelId = document.getElementById('model-select').value;
+      if (!modelId) {
+        showAlert('Выберите модель для обучения', 'warning');
+        return;
+      }
+
+      // Создаем FormData и добавляем файлы
+      const formData = new FormData();
+      formData.append('model_id', modelId);
+
+      // Получаем файлы из формы создания модели
+      const projectFile = document.querySelector('#create-model-form input[name="project_file"]').files[0];
+      const staffFile = document.querySelector('#create-model-form input[name="staff_file"]').files[0];
+      const weatherFile = document.querySelector('#create-model-form input[name="weather_file"]').files[0];
+
+      if (!projectFile || !staffFile || !weatherFile) {
+        showAlert('Загрузите все файлы данных (проект, персонал, погода) перед обучением', 'warning');
+        return;
+      }
+
+      formData.append('project_file', projectFile);
+      formData.append('staff_file', staffFile);
+      formData.append('weather_file', weatherFile);
+
+      try {
+        showAlert('Обучение модели начато... Это может занять несколько минут.', 'info');
+
+        const response = await fetch(`/api/models/${modelId}/train/`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Ошибка обучения модели');
+        }
+
+        const data = await response.json();
+        showAlert('Модель успешно обучена!', 'success');
+        loadModelDetails(modelId); // Обновляем информацию о модели
+
+      } catch (error) {
+        showAlert('Ошибка обучения: ' + error.message, 'danger');
+        console.error('Error:', error);
+      }
+    }
+    async function getPrediction() {
+      const modelId = document.getElementById('model-select').value;
+      if (!modelId) {
+        showAlert('Выберите модель для прогнозирования', 'warning');
+        return;
+      }
+
+      try {
+        showAlert('Выполняется прогнозирование...', 'info');
+
+        const response = await fetch(`/api/models/${modelId}/predict/`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Ошибка сервера');
+        }
+
+        const data = await response.json();
+        showPredictionResults(data);
+
+      } catch (error) {
+        showAlert('Ошибка: ' + error.message, 'danger');
+        console.error('Error:', error);
+      }
+    }
+        // Новая логика для работы с моделями
+    async function createAndTrainModel() {
+      const form = document.getElementById('model-form');
+      const formData = new FormData(form);
+      const projectId = document.getElementById('project-select').value;
+
+      if (!projectId) {
+        showAlert('Сначала выберите проект!', 'warning');
+        return;
+      }
+
+      try {
+        // Обновляем статус
+        document.getElementById('status-text').textContent = 'Создание модели...';
+        document.getElementById('model-status').className = 'model-status status-not-trained';
+        document.getElementById('training-progress').style.display = 'block';
+        updateProgress(0);
+
+        // Создание модели
+        const createResponse = await fetch('/api/models/', {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        });
+
+        if (!createResponse.ok) throw new Error('Ошибка создания модели');
+        const model = await createResponse.json();
+        currentModelId = model.id;
+
+        // Обучение модели
+        document.getElementById('status-text').textContent = 'Обучение модели...';
+        const trainResponse = await fetch(`/api/models/${model.id}/train/`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        });
+
+        if (!trainResponse.ok) throw new Error('Ошибка обучения модели');
+
+        // Обновление интерфейса
+        document.getElementById('status-text').textContent = 'Модель готова к использованию!';
+        document.getElementById('model-status').className = 'model-status status-trained';
+        document.getElementById('predict-btn').style.display = 'block';
+        document.getElementById('prediction-results').style.display = 'block';
+        document.getElementById('training-progress').style.display = 'none';
+
+      } catch (error) {
+        document.getElementById('status-text').textContent = `Ошибка: ${error.message}`;
+        document.getElementById('model-status').className = 'model-status status-error';
+        document.getElementById('training-progress').style.display = 'none';
+        showAlert(error.message, 'danger');
+      }
+    }
+
+    async function makePrediction() {
+      if (!currentModelId) {
+        showAlert('Сначала создайте и обучите модель', 'warning');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/models/${currentModelId}/predict/`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const data = await response.json();
+        updatePredictionResults(data);
+
+      } catch (error) {
+        showAlert(`Ошибка прогнозирования: ${error.message}`, 'danger');
+      }
+    }
+
+    function updateProgress(percent) {
+      const progressBar = document.querySelector('.progress-bar');
+      progressBar.style.width = `${percent}%`;
+      progressBar.textContent = `${percent}%`;
+    }
+
+    function updatePredictionResults(data) {
+      const tableBody = document.getElementById('prediction-table');
+      tableBody.innerHTML = '';
+
+      data.forecast.forEach((value, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>День ${index + 1}</td>
+          <td>${value.toFixed(1)}%</td>
+        `;
+        tableBody.appendChild(row);
+      });
+
+      // Обновление графика
+      if (predictionChart) predictionChart.destroy();
+
+      const ctx = document.getElementById('prediction-chart').getContext('2d');
+      predictionChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: data.forecast.map((_, i) => `День ${i + 1}`),
+          datasets: [{
+            label: 'Прогноз готовности',
+            data: data.forecast,
+            borderColor: '#4bc0c0',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            borderWidth: 2,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              title: { display: true, text: 'Готовность, %' }
+            }
+          }
+        }
+      });
+    }
+
+    // Общие вспомогательные функции
+    function showAlert(message, type) {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type} alert-dismissible fade show`;
+      alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      `;
+      document.querySelector('.container').prepend(alert);
+      setTimeout(() => alert.remove(), 3000);
+    }
+
+    // Инициализация графиков
+    Chart.register(ChartZoom, {
+      id: 'date_adapter',
+      beforeInit: function(chart) {
+        if (chart.options.scales?.x?.type === 'time') {
+          chart.options.scales.x.adapters = { date: { zone: 'UTC' } };
+        }
+      }
+    });
+
+    function showPredictionResults(data) {
+      const resultsDiv = document.getElementById('prediction-results');
+      resultsDiv.innerHTML = `
+        <div class="card">
+          <div class="card-header">Результаты прогноза</div>
+          <div class="card-body">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Прогнозируемый прогресс</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${data.forecast.map((value, i) => `
+                  <tr>
+                    <td>${data.dates[i]}</td>
+                    <td>${value.toFixed(2)}%</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    async function makePrediction(modelId) {
+      try {
+          showAlert('Прогнозирование...', 'info');
+
+          const response = await fetch(`/api/models/${modelId}/predict/`, {
+              method: 'POST',
+              headers: {
+                  'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                  'Content-Type': 'application/json'
+              }
+          });
+
+          const data = await response.json();
+
+          document.getElementById('prediction-results').innerHTML = `
+              <div class="card mt-3">
+                  <div class="card-body">
+                      <h5>Прогноз на 7 дней</h5>
+                      ${data.forecast.map((val, i) => `
+                          <p>День ${i+1}: ${val.toFixed(2)}%</p>
+                      `).join('')}
+                  </div>
+              </div>
+          `;
+
+      } catch (error) {
+          showAlert('Ошибка прогноза: ' + error.message, 'danger');
+      }
+  }
+
+    function displayPredictionResults(forecast, dates) {
+      const resultsDiv = document.getElementById('prediction-results');
+      resultsDiv.innerHTML = `
+        <div class="card mt-3">
+          <div class="card-header">Прогноз на 7 дней</div>
+          <div class="card-body">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Прогнозируемый прогресс</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${forecast.map((value, i) => `
+                  <tr>
+                    <td>${dates[i]}</td>
+                    <td>${value.toFixed(2)}%</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function displayPredictionResults(forecast) {
+      const resultsDiv = document.getElementById('prediction-results');
+      resultsDiv.innerHTML = `
+        <h5>Результаты прогнозирования:</h5>
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>День</th>
+              <th>Прогнозируемая готовность</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${forecast.map((value, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td>${value.toFixed(2)}%</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    async function deleteModel(modelId) {
+      if (!confirm('Удалить модель? Это действие нельзя отменить.')) return;
+
+      try {
+        const response = await fetch(`/api/models/${modelId}/`, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        });
+
+        if (response.ok) {
+          showAlert('Модель удалена', 'info');
+          document.querySelector(`#model-select option[value="${modelId}"]`).remove();
+          document.getElementById('model-details').innerHTML = '';
+          document.getElementById('prediction-block').style.display = 'none';
+        } else {
+          const data = await response.json();
+          throw new Error(data.error || 'Ошибка удаления модели');
+        }
+      } catch (error) {
+        showAlert('Ошибка удаления модели: ' + error.message, 'danger');
+        console.error('Error:', error);
+      }
+    }
+
+    // Инициализация
+    document.getElementById('project-select').addEventListener('change', function() {
+      loadProjectData(this.value);
+    });
+  </script>
+</body>
+</html>
