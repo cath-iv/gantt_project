@@ -64,39 +64,7 @@ class StaffSerializer(serializers.ModelSerializer):
         model = Staff
         fields = '__all__'
 
-
-from rest_framework import serializers
-from .models import Models
-
-
-class ModelsSerializer(serializers.ModelSerializer):
-    # Добавляем человекочитаемые названия для полей с choices
-    name_neural_display = serializers.CharField(
-        source='get_name_neural_display',
-        read_only=True
-    )
-
+class ModelSerializer(serializers.ModelSerializer):
     class Meta:
         model = Models
-        fields = [
-            'id',
-            'profile_name',
-            'project',
-            'num_epoch',
-            'batch_size',
-            'slide_window',
-            'name_neural',
-            'name_neural_display',
-            'model_config',
-            'train_metrics',
-            'created_at',
-            'framework_version',
-            'model_type'
-        ]
-        read_only_fields = [
-            'id',
-            'created_at',
-            'framework_version',
-            'model_type',
-            'name_neural_display'
-        ]
+        fields = '__all__'

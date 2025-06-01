@@ -1,10 +1,23 @@
-import numpy as np
 from rest_framework import viewsets, status, request
-from rest_framework.decorators import api_view, action
-from rest_framework.decorators import api_view
-from datetime import datetime, timedelta
+from rest_framework.decorators import action
+from datetime import datetime, timezone
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 
-from .ml.preprocess import prepare_data
+from .ml.models import forecast, Model, model_to_bytes, evaluate_model_performance
+from .ml.preprocess import prepare_data, preprocess_to_model
+from rest_framework.serializers import ModelSerializer
+from django.shortcuts import render
+from datetime import timedelta
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+import pandas as pd
+import io
+import tensorflow as tf
+from django.utils import timezone
 from .models import (
     ConstructionProject,
     Resource,
@@ -19,14 +32,10 @@ from .serializers import (
     ConstructionProjectSerializer,
     ResourceSerializer,
     TaskSerializer,
-    TaskDependencySerializer,
-    WeatherSerializer,
-    ResourceRemainsSerializer,
-    StaffSerializer,
-    ModelsSerializer
+    ModelSerializer
 )
 from .services import calculate_project_progress
-from .utils import process_excel, get_weather
+from .utils import process_excel
 
 
 class ConstructionProjectViewSet(viewsets.ModelViewSet):
@@ -45,7 +54,6 @@ class ConstructionProjectViewSet(viewsets.ModelViewSet):
 class ResourceViewSet(viewsets.ModelViewSet):
     queryset = Resource.objects.all()
     serializer_class = ResourceSerializer
-
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all()
@@ -67,11 +75,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-
 class ModelsViewSet(viewsets.ModelViewSet):
 
     queryset = Models.objects.all()
-    serializer_class = ModelsSerializer
+    serializer_class = ModelSerializer
 
     @action(detail=True, methods=['post'])
     def retrain(self, request, pk=None):
@@ -117,34 +124,6 @@ def create_project(request):
         }, status=201)
     except Exception as e:
         return Response({'error': str(e)}, status=400)
-'''
-
-@api_view(['POST'])
-def create_project(request):
-    """Создание проекта с проверкой"""
-    try:
-        name = request.data.get('name')
-        if not name:
-            return Response({'error': 'Название обязательно'}, status=400)
-
-        project = ConstructionProject.objects.create(
-            name=name,
-            status='planned'
-        )
-
-
-        projects = ConstructionProject.objects.all().values('project_id', 'name')
-        return Response({
-            'status': 'success',
-            'projects': list(projects)
-        })
-    except Exception as e:
-        return Response({'error': str(e)}, status=400)
-'''
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-
 @api_view(['POST'])
 def create_task(request):
     """Создание задачи (упрощенная версия)"""
@@ -162,7 +141,6 @@ def create_task(request):
         return Response({'status': 'success', 'task_id': task.task_id})
     except Exception as e:
         return Response({'error': str(e)}, status=400)
-
 @api_view(['PUT', 'DELETE'])
 def task_detail(request, task_id):
     task = get_object_or_404(Task, pk=task_id)
@@ -177,7 +155,6 @@ def task_detail(request, task_id):
     elif request.method == 'DELETE':
         task.delete()
         return Response(status=204)
-
 @api_view(['DELETE'])
 def delete_project(request, project_id):
     project = get_object_or_404(ConstructionProject, pk=project_id)
@@ -196,8 +173,6 @@ def gantt_data(request, project_id):
         'tasks': list(tasks),
         'dependencies': list(dependencies)
     })
-
-
 @api_view(['GET'])
 def project_progress_chart(request, project_id):
     progress_data = (
@@ -215,8 +190,6 @@ def project_progress_chart(request, project_id):
         'planned': planned_data,
         'status': 'success'
     })
-
-
 @api_view(['POST'])
 def update_progress_cache(request, project_id):
     """
@@ -233,14 +206,6 @@ def update_progress_cache(request, project_id):
             'status': 'error',
             'message': str(e)
         }, status=400)
-
-
-from django.db.models import Sum, F
-from datetime import timedelta
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import ConstructionProject, ProjectProgress, Task, ResourceRemains
-
 
 @api_view(['GET'])
 def project_progress(request, project_id):
@@ -284,24 +249,6 @@ def calculate_progress(request, project_id):
             'status': 'error',
             'message': str(e)
         }, status=400)
-
-@api_view(['POST'])
-def create_model(request):
-    try:
-        model = Models.objects.create(
-            profile_name=request.data['profile_name'],
-            project_id=request.data['project_id'],
-            num_epoch=request.data['num_epoch'],
-            batch_size=request.data['batch_size'],
-            slide_window=request.data['slide_window'],
-            name_neural=request.data['name_neural']
-        )
-        if 'excel_file' in request.FILES:
-            process_excel(request.FILES['excel_file'])
-        return Response({'status': 'success', 'model_id': model.id})
-    except Exception as e:
-        return Response({'error': str(e)}, status=400)
-
 @api_view(['GET'])
 def get_tasks(request):
     """Получение задач проекта для форм"""
@@ -316,13 +263,6 @@ def get_projects(request):
     projects = ConstructionProject.objects.all()
     serializer = ConstructionProjectSerializer(projects, many=True)
     return Response(serializer.data)
-
-
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from .models import Task, ConstructionProject
-from .serializers import TaskSerializer
 
 @api_view(['GET'])
 def project_tasks(request, project_id):
@@ -446,7 +386,7 @@ def model_detail(request, model_id):
     model = get_object_or_404(Models, pk=model_id)
 
     if request.method == 'GET':
-        serializer = ModelsSerializer(model)
+        serializer = ModelSerializer(model)
         return Response(serializer.data)
 
     elif request.method == 'DELETE':
@@ -470,8 +410,6 @@ def gantt_data(request, project_id):
         'dependencies': list(dependencies)
     })
 
-from django.shortcuts import render
-
 def welcome_view(request):
     return render(request, 'planning/welcome.html')
 
@@ -485,8 +423,6 @@ def planner_view(request):
         'tasks': Task.objects.all().select_related('resource'),
     }
     return render(request, 'planning/planner.html', context)
-
-
 @api_view(['GET'])
 def get_weather(request):
     date = request.GET.get('date')
@@ -506,7 +442,6 @@ def get_weather(request):
         return Response({'error': 'Weather data not found'}, status=404)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
-
 
 @api_view(['POST'])
 def save_progress(request):
@@ -530,257 +465,224 @@ def save_progress(request):
     except Exception as e:
         return Response({'status': 'error', 'message': str(e)}, status=400)
 
+class ModelsViewSet(viewsets.ModelViewSet):
+    queryset = Models.objects.all()
+    serializer_class = ModelSerializer
 
-from rest_framework.decorators import api_view, parser_classes
-from rest_framework.parsers import MultiPartParser, JSONParser
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-import pandas as pd
-import numpy as np
-import json
-from .models import Models, ConstructionProject
-from .ml.models import LSTMForecaster
-from .ml.preprocess import prepare_data
-from .serializers import ModelsSerializer
-
-
+# Для получения деталей модели
 @api_view(['GET'])
-def get_model_params(request):
-    """GET метод для получения параметров модели по ID"""
-    model_id = request.GET.get('model_id')
-    if not model_id:
-        return Response(
-            {'error': 'Необходимо указать model_id'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
+def model_detail(request, model_id):
     try:
-        model = get_object_or_404(Models, pk=model_id)
-        serializer = ModelsSerializer(model)
+        model = Models.objects.get(pk=model_id)
+        serializer = ModelSerializer(model)
         return Response(serializer.data)
-    except Exception as e:
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+    except Models.DoesNotExist:
+        return Response({'error': 'Model not found'}, status=404)
+
+# Для удаления модели
+@api_view(['DELETE'])
+def delete_model(request, model_id):
+    try:
+        model = Models.objects.get(pk=model_id)
+        model.delete()
+        return Response({'status': 'success'})
+    except Models.DoesNotExist:
+        return Response({'error': 'Model not found'}, status=404)
+
+def get_latest_project_data(project_id, n_steps):
+    """Получает последние данные проекта для прогноза"""
+    # Реализация получения данных
+    return np.array([...])  # Данные в форме [1, n_steps, n_features]
+
+def generate_future_dates(days):
+    """Генерирует даты для прогноза"""
+    today = datetime.now()
+    return [(today + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, days + 1)]
+
+
+from .file_utils import save_files_to_temp
 
 
 @api_view(['POST'])
-@parser_classes([MultiPartParser, JSONParser])
-def set_model_params(request):
-    """POST метод для установки параметров модели"""
+@parser_classes([MultiPartParser, FormParser])
+def create_model(request):
     try:
-        # Получаем параметры из JSON или form-data
-        data = request.data.dict() if hasattr(request.data, 'dict') else request.data
+        data = request.data
+        files = request.FILES
 
-        required_params = ['n_steps', 'epochs', 'batch_size', 'project_id']
-        if not all(param in data for param in required_params):
-            return Response(
-                {'error': f'Необходимые параметры: {", ".join(required_params)}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Проверяем наличие обязательных файлов
+        required_files = ['project_file', 'staff_file', 'weather_file']
+        for file_key in required_files:
+            if file_key not in files:
+                return Response({'error': f'Missing file: {file_key}'}, status=400)
 
-        # Проверяем существование проекта
-        get_object_or_404(ConstructionProject, pk=data['project_id'])
-
-        # Создаем или обновляем модель
-        model, created = Models.objects.update_or_create(
+        # Создаем запись модели
+        model = Models.objects.create(
+            profile_name=data['profile_name'],
             project_id=data['project_id'],
-            profile_name=data.get('profile_name', 'default'),
-            defaults={
-                'num_epoch': data['epochs'],
-                'batch_size': data['batch_size'],
-                'slide_window': data['n_steps'],
-                'name_neural': data.get('name_neural', 'lstm'),
-                'model_config': {
-                    'n_steps': data['n_steps'],
-                    'n_features': data.get('n_features', 10),
-                    'n_outputs': data.get('n_outputs', 7)
-                }
-            }
+            num_epoch=int(data['num_epoch']),
+            batch_size=int(data['batch_size']),
+            slide_window=int(data['slide_window']),
+            model_type=data['model_type'],
+            created_at=timezone.now(),
+            framework_version=tf.__version__
         )
+
+        # Сохраняем файлы во временную директорию
+        save_files_to_temp(files, model.id)
 
         return Response({
             'status': 'success',
             'model_id': model.id,
-            'created': created
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-
-    except Exception as e:
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['POST'])
-@parser_classes([MultiPartParser])
-def upload_training_data(request):
-    """POST метод для загрузки данных обучения"""
-    try:
-        # Проверяем наличие всех необходимых файлов
-        required_files = ['project', 'staff', 'weather']
-        if not all(f'{file}_file' in request.FILES for file in required_files):
-            return Response(
-                {'error': 'Необходимо загрузить 3 файла: project, staff и weather'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Получаем model_id
-        model_id = request.POST.get('model_id')
-        if not model_id:
-            return Response(
-                {'error': 'Необходимо указать model_id'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        model = get_object_or_404(Models, pk=model_id)
-
-        # Загружаем файлы
-        project_df = pd.read_excel(request.FILES['project_file'])
-        staff_df = pd.read_excel(request.FILES['staff_file'])
-        weather_df = pd.read_excel(request.FILES['weather_file'])
-
-        # Подготавливаем данные
-        prepared_data = prepare_data(project_df, staff_df, weather_df)
-
-        # Сохраняем данные в модель (в реальном проекте лучше сохранять в хранилище)
-        model.model_config['last_prepared_data'] = {
-            'columns': list(prepared_data.columns),
-            'shape': prepared_data.shape,
-            'min_date': str(prepared_data.index.min()),
-            'max_date': str(prepared_data.index.max())
-        }
-        model.save()
-
-        return Response({
-            'status': 'success',
-            'model_id': model_id,
-            'data_info': model.model_config['last_prepared_data']
+            'message': 'Модель успешно создана. Теперь можно обучить.'
         })
-
     except Exception as e:
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return Response({'error': str(e)}, status=400)
 
 
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-from .models import Models
-from .ml.models import LSTMForecaster
-import pandas as pd
-import json
+from .file_utils import get_temp_files, delete_temp_files
 
 
 
+@parser_classes([MultiPartParser, FormParser])
 @api_view(['POST'])
-def train_model(request, pk):
+def train_model(request, model_id):
     try:
-        model = get_object_or_404(Models, pk=pk)
+        print(f"\n=== Starting training for model {model_id} ===")
 
-        # Проверяем загружены ли файлы данных
-        if not all([
-            request.FILES.get('project_file'),
-            request.FILES.get('staff_file'),
-            request.FILES.get('weather_file')
-        ]):
-            return Response(
-                {'error': 'Необходимо загрузить все файлы данных (project, staff, weather)'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # 1. Получаем модель
+        model = Models.objects.get(pk=model_id)
+        print(f"Model params - epochs: {model.num_epoch}, batch: {model.batch_size}, window: {model.slide_window}")
+        print("Model retrieved:", model.id)
 
-        # Загружаем данные
-        project_df = pd.read_excel(request.FILES['project_file'])
-        staff_df = pd.read_excel(request.FILES['staff_file'])
-        weather_df = pd.read_excel(request.FILES['weather_file'])
+        # 2. Получаем пути к файлам
+        file_paths = get_temp_files(model_id)
+        print("File paths:", file_paths)
 
-        # Подготавливаем данные
-        prepared_data = prepare_data(project_df, staff_df, weather_df)
+        if not file_paths:
+            print("Error: No files found")
+            return Response({'error': 'Files not found for training'}, status=400)
 
-        # Сохраняем информацию о данных в модель
-        model.model_config.update({
-            'last_prepared_data': {
-                'columns': list(prepared_data.columns),
-                'shape': prepared_data.shape,
-                'min_date': str(prepared_data.index.min()),
-                'max_date': str(prepared_data.index.max()),
-                'n_features': len(prepared_data.columns)
-            }
-        })
+        # 3. Чтение файлов
+        try:
+            print("\nReading files...")
+            project_data = pd.read_excel(file_paths['project_file'], engine='openpyxl')
+            staff_data = pd.read_excel(file_paths['staff_file'], engine='openpyxl')
+            weather_data = pd.read_excel(file_paths['weather_file'], engine='openpyxl')
 
-        # Создаем и обучаем модель
-        forecaster = LSTMForecaster(
-            n_steps=model.slide_window,
-            n_features=len(prepared_data.columns),
-            n_outputs=7
+            print("Files read successfully")
+            print("Project data shape:", project_data.shape)
+            print("Staff data shape:", staff_data.shape)
+            print("Weather data shape:", weather_data.shape)
+
+        except Exception as e:
+            print("Error reading files:", str(e))
+            return Response({'error': f'Error reading files: {str(e)}'}, status=400)
+
+        # 4. Подготовка данных
+        try:
+            print("\nPreparing data...")
+            prepared_data = prepare_data(project_data, staff_data, weather_data)
+            print("Data prepared successfully")
+            print("Prepared data columns:", prepared_data.columns.tolist())
+
+        except Exception as e:
+            print("Error preparing data:", str(e))
+            return Response({'error': f'Data preparation failed: {str(e)}'}, status=400)
+
+        # Преобразование данных для модели
+        train_x_combined, train_y_combined, test_x_combined, test_y_combined, scaler = preprocess_to_model(prepared_data, model.slide_window)
+        print("Train data prepared successfully")
+
+        model_creator = Model()
+        model_instance = model_creator.create_model(
+            model_type=model.model_type,
+            n_timesteps = train_x_combined.shape[1],
+            n_features = train_x_combined.shape[2],
+            n_outputs=train_y_combined.shape[1]
         )
-
-        train_x, train_y, test_x, test_y = forecaster.prepare_training_data([prepared_data])
-        history = forecaster.train(
-            train_x, train_y,
-            epochs=model.num_epoch,
+        print("Model created")
+        # Обучение модели
+        model_instance, history = model_creator.train_model(
+            model_instance,
+            train_x_combined,
+            train_y_combined,
+            n_outputs=model.slide_window,
+            epochs=model.num_epoch,  # Используем сохранённое значение
             batch_size=model.batch_size
         )
-
-        # Сохраняем модель и метрики
-        model.model_data = forecaster.model_to_bytes()
-        model.train_metrics = {
-            'test_metrics': forecaster.evaluate(test_x, test_y),
-            'history': history.history
-        }
-        model.save()
-
-        return Response({
-            'status': 'success',
-            'model_id': model.id,
-            'metrics': model.train_metrics
-        })
-
-    except Exception as e:
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        print("Success!")
+        # Оценка модели
+        test_rmse, test_scores = model_creator.evaluate_model(
+            model_instance,
+            train_x_combined,
+            train_y_combined,
+            test_x_combined,
+            test_y_combined
         )
+        print("Scores", test_rmse, test_scores)
+        # Сохранение модели и метрик в БД
+        metrics = evaluate_model_performance(model_instance,
+                                            train_x_combined,
+                                            train_y_combined,
+                                            test_x_combined,
+                                            test_y_combined)
 
+        try:
+            # В train_model:
+            buffer = model_to_bytes(model_instance.model)
+            model.model_data = buffer
 
-@api_view(['POST'])
-def model_predict(request, pk):
-    try:
-        model = get_object_or_404(Models, pk=pk)
-
-        # Создаем временный scaler для этого запроса
-        from sklearn.preprocessing import MinMaxScaler
-        scaler = MinMaxScaler()
-
-        # Получаем данные проекта
-        progress = ProjectProgress.objects.filter(
-            project=model.project
-        ).order_by('-date')[:model.slide_window]
-
-        if len(progress) < model.slide_window:
-            return Response(
-                {'error': f'Нужно минимум {model.slide_window} дней данных'},
-                status=400
-            )
-
-        # Подготавливаем данные
-        values = [p.cumulative_progress for p in progress]
-        scaled = scaler.fit_transform([[v] for v in values])
-
-        # Прогнозируем
-        forecaster = LSTMForecaster.load_from_db(model.id)
-        forecast = forecaster.predict(np.array([scaled]))
-        forecast = scaler.inverse_transform(forecast)
+            model.train_metrics = {
+                'test_rmse': test_rmse,
+                'test_scores': test_scores,
+                'test_metrics': {
+                   'mae': metrics['mae'],
+                   'mape': metrics['mape'],
+               }
+            }
+            model.save()
+            delete_temp_files(model_id)
+        except Exception as e:
+            print(f"Error saving model: {str(e)}")
+            return Response({'error': f'Model saving failed: {str(e)}'}, status=500)
 
         return Response({
             'status': 'success',
-            'forecast': forecast.flatten().tolist()
+            'metrics': model.train_metrics,
+            'message': 'Модель успешно обучена'
         })
-
+    except Models.DoesNotExist:
+        return Response({'error': 'Model not found'}, status=404)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+
+# Для прогнозирования
+@api_view(['POST'])
+def model_predict(request, model_id):
+    try:
+        model = Models.objects.get(pk=model_id)
+
+        # Загрузка модели из БД
+        buffer = io.BytesIO(model.model_data)
+        loaded_model = tf.keras.models.load_model(buffer)
+
+        # Получение данных для прогноза
+        last_7_days = get_latest_project_data(model.project_id, model.slide_window)
+
+        # Прогнозирование
+        predicted_values = forecast(loaded_model, last_7_days, n_input=model.slide_window)
+        predicted_values = [min(100, max(0, x[0])) for x in predicted_values]  # Ограничение 0-100%
+
+        # Форматирование дат
+        dates = generate_future_dates(model.slide_window)
+
+        return Response({
+            'status': 'success',
+            'forecast': predicted_values,
+            'dates': dates
+        })
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+

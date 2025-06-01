@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     path('', views.welcome_view, name='welcome'),  # Главная страница — экран приветствия
@@ -22,10 +24,20 @@ urlpatterns = [
     path('api/weather/', views.get_weather, name='get-weather'),
 
     # Модели
-    path('api/models/', views.create_model, name='model-list'),
+
     path('api/models/<int:model_id>/', views.model_detail, name='model-detail'),
     path('api/projects/<int:project_id>/progress/', views.project_progress, name='project-progress'),
     path('api/projects/<int:project_id>/calculate-progress/', views.calculate_progress, name='calculate-progress'),
-    path('api/models/<int:pk>/train/', views.train_model, name='train-model'),
-    path('api/models/<int:pk>/predict/', views.model_predict, name='model-predict'),
-]
+
+    #path('api/models/', views.model_list),
+    path('api/models/<int:pk>/', views.model_detail),
+   # path('api/models/<int:pk>/train/', views.train_model),
+    #path('api/models/<int:pk>/predict/', views.make_prediction),
+    path('api/models/', views.create_model, name='create-model'),
+    path('api/models/<int:model_id>/train/', views.train_model, name='train-model'),
+    path('api/models/<int:model_id>/delete/', views.delete_model, name='delete_model'),
+
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

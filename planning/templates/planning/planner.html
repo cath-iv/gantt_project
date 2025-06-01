@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.css">
   <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
   <title>Планировщик</title>
@@ -12,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <style>
-    /* Ваши существующие стили остаются без изменений */
+
     .form-container { display: none; }
     #tasks-block, #progress-block { transition: all 0.3s ease; }
     .task-card {
@@ -128,11 +129,24 @@
       }
     }
 
-    /* Стили для графика прогресса */
+
+// Стили для графика (добавьте в ваш существующий блок стилей)
     #progress-chart-container {
-      height: 400px;
-      width: 100%;
-      position: relative;
+        height: 400px;
+        width: 100%;
+        min-height: 400px; /* Фиксированная высота */
+        position: relative;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 15px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    #progress-chart {
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 370px; /* Сохраняем пропорции */
     }
     .progress-controls {
       margin-bottom: 10px;
@@ -318,7 +332,6 @@
     </div>
 
     <!-- Прогнозирование -->
-    <!-- Блок прогнозирования - модифицируем существующий -->
     <div class="card mb-4">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>Прогнозирование</span>
@@ -337,7 +350,7 @@
             </select>
           </div>
           <div class="col-md-6">
-            <button class="btn btn-outline-primary w-100" onclick="trainSelectedModel()">
+            <button id="train-btn" class="btn btn-outline-primary w-100" onclick="trainSelectedModel()">
               Обучить модель
             </button>
           </div>
@@ -354,9 +367,13 @@
               </div>
               <div class="col-md-6">
                 <label class="form-label">Тип модели*</label>
-                <select name="name_neural" class="form-select" required>
-                  <option value="lstm">Модель LSTM (baseline)</option>
-                  <!--<option value="linear">Linear Regression</option>-->
+                <select name="model_type" class="form-select" required>
+                  <option value="LSTM">LSTM</option>
+                  <option value="GRU">GRU</option>
+                  <option value="RNN">RNN (baseline)</option>
+                  <option value="Bidirectional">Bidirectional</option>
+                  <option value="CNN">CNN</option>
+                  <option value="TCN">TCN</option>
                 </select>
               </div>
               <div class="col-md-4">
@@ -389,7 +406,6 @@
             </div>
             <div class="d-flex justify-content-between">
               <button type="button" class="btn btn-success" onclick="createModel()">Сохранить модель</button>
-              <button type="button" class="btn btn-primary" onclick="trainSelectedModel()">Обучить модель</button>
               <button type="button" class="btn btn-secondary" onclick="toggleModelForm()">Отмена</button>
             </div>
           </form>
@@ -398,105 +414,31 @@
         <!-- Детали модели -->
         <div id="model-details" class="mt-3"></div>
 
-        <!-- Блок прогнозирования -->
+        <!-- Результаты прогнозирования -->
+        <div id="prediction-results" class="mt-3"></div>
+      </div>
+    </div>
+
+    <!-- График строительной готовности -->
     <div class="card mb-4">
-      <div class="card-header">
-        <h5>Профиль прогнозирования</h5>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>График строительной готовности</span>
+        <div class="btn-group progress-controls">
+          <button class="btn btn-sm btn-outline-secondary" id="zoom-in-progress">+</button>
+          <button class="btn btn-sm btn-outline-secondary" id="zoom-out-progress">-</button>
+          <select class="form-select form-select-sm" id="time-range-select">
+            <option value="all">Весь период</option>
+            <option value="month">1 месяц</option>
+            <option value="7days">7 дней</option>
+          </select>
+        </div>
       </div>
       <div class="card-body">
-        <form id="model-form" enctype="multipart/form-data">
-          {% csrf_token %}
-          <div class="row g-3 mb-3">
-              <div class="col-md-6">
-                <label class="form-label">Название профиля*</label>
-                <input type="text" name="profile_name" class="form-control" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Архитектура модели*</label>
-                <select name="name_neural" class="form-select" required>
-                  <option value="lstm">LSTM (baseline)</option>
-                </select>
-              </div>
-
-              <label class="form-label">Параметры модели*</label>
-
-              <div class="col-md-4">
-                <label class="form-label">Эпох обучения*</label>
-                <input type="number" name="num_epoch" class="form-control" min="1" value="15" required>
-              </div>
-              <div class="col-md-4">
-                <label class="form-label">Размер батча*</label>
-                <input type="number" name="batch_size" class="form-control" min="1" value="14" required>
-              </div>
-              <div class="col-md-4">
-                <label class="form-label">Горизонт прогнозирования*</label>
-                <input type="number" name="slide_window" class="form-control" min="1" value="7" required>
-              </div>
-
-
-
-            <div class="col-12">
-              <label class="form-label">Данные для обучения*</label>
-              <div class="mb-2">
-                <input type="file" name="project_file" class="form-control" accept=".xlsx" required>
-                <small class="text-muted">Данные проекта (.xlsx)</small>
-              </div>
-              <div class="mb-2">
-                <input type="file" name="staff_file" class="form-control" accept=".xlsx" required>
-                <small class="text-muted">Данные персонала (.xlsx)</small>
-              </div>
-              <div class="mb-2">
-                <input type="file" name="weather_file" class="form-control" accept=".xlsx" required>
-                <small class="text-muted">Данные погоды (.xlsx)</small>
-              </div>
-            </div>
-          </div>
-
-          <div id="model-status" class="model-status status-not-trained">
-            <div id="status-text">Модель не обучена</div>
-            <div id="training-progress">
-              <div class="progress mt-2">
-                <div class="progress-bar progress-bar-striped progress-bar-animated"
-                     role="progressbar" style="width: 0%">0%</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="d-grid gap-2">
-            <button type="button" class="btn btn-primary" onclick="createAndTrainModel()">
-              Создать и обучить модель
-            </button>
-            <button type="button" class="btn btn-success" onclick="makePrediction()"
-                    id="predict-btn" style="display: none;">
-              Получить прогноз
-            </button>
-          </div>
-        </form>
-
+        <div id="progress-chart-container">
+          <canvas id="progress-chart" width="788" height="500" style="display: block; height: 400px; width: 630px;"></canvas>
         </div>
-    </div>
       </div>
     </div>
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <span>График строительной готовности</span>
-      <div class="btn-group progress-controls">
-        <button class="btn btn-sm btn-outline-secondary" id="zoom-in-progress">+</button>
-        <button class="btn btn-sm btn-outline-secondary" id="zoom-out-progress">-</button>
-        <select class="form-select form-select-sm" id="time-range-select">
-          <option value="all">Весь период</option>
-          <option value="month">1 месяц</option>
-        <!--  <option value="week">1 неделя</option> -->
-          <option value="7days">7 дней</option>
-        </select>
-      </div>
-    </div>
-    <div class="card-body">
-      <div id="progress-chart-container">
-        <canvas id="progress-chart"></canvas>
-      </div>
-    </div>
-  </div>
 
   <script>
     // Глобальные переменные для графика
@@ -590,7 +532,7 @@
               label: 'Прогнозируемая готовность',
               data: filteredPredicted.map(item => ({
                 x: item.date,
-                y: item.value * 100
+                y: item.value * 100 /// Уточнить вот тут!!!
               })),
               borderColor: 'rgba(54, 162, 235, 0.7)',
               backgroundColor: 'transparent',
@@ -700,7 +642,7 @@
     }
 
     // Обработчики событий
-    // Обработчики событий
+
     document.getElementById('zoom-in-progress').addEventListener('click', () => {
       if (progressChart) {
         progressChart.options.scales.x.min = progressChart.scales.x.min * 0.9;
@@ -1259,283 +1201,18 @@
       }, 3000);
     }
 
-    // Управление моделями
-        function toggleModelForm() {
-      const form = document.getElementById('model-form');
-      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    // Вспомогательные функции
+    function getCSRFToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
     }
 
-    async function createModel() {
-      const form = document.getElementById('create-model-form');
-      const formData = new FormData(form);
-      const projectId = document.getElementById('project-select').value;
-
-      if (!projectId) {
-        showAlert('Сначала выберите проект!', 'warning');
-        return;
-      }
-
-      formData.append('project_id', projectId);
-
-      try {
-        const response = await fetch('/api/models/', {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
-          }
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-          showAlert('Модель успешно создана!', 'success');
-          toggleModelForm();
-          updateModelSelect(data.model_id, data.profile_name);
-        } else {
-          throw new Error(data.error || 'Ошибка создания модели');
-        }
-      } catch (error) {
-        showAlert('Ошибка: ' + error.message, 'danger');
-        console.error('Error:', error);
-      }
-    }
-
-    function updateModelSelect(modelId, profileName) {
-      const select = document.getElementById('model-select');
-      const option = document.createElement('option');
-      option.value = modelId;
-      option.textContent = profileName;
-      select.appendChild(option);
-      select.value = modelId;
-      loadModelDetails(modelId);
-    }
-
-    async function loadModelDetails(modelId) {
-      const detailsDiv = document.getElementById('model-details');
-      if (!detailsDiv) return; // Защита от ошибки
-
-      try {
-          if (!modelId) {
-              detailsDiv.innerHTML = '';
-              return;
-          }
-
-          const response = await fetch(`/api/models/${modelId}/`);
-          const model = await response.json();
-
-          detailsDiv.innerHTML = `
-              <div class="card mt-3">
-                  <div class="card-body">
-                      <h5>${model.profile_name}</h5>
-                      <p><strong>Тип:</strong> ${model.name_neural === 'lstm' ? 'LSTM' : model.name_neural}</p>
-                      <p><strong>Эпохи:</strong> ${model.num_epoch}</p>
-                      <p><strong>Батч:</strong> ${model.batch_size}</p>
-                      <p><strong>Горизонт:</strong> ${model.slide_window} дней</p>
-
-                      ${model.train_metrics ? `
-                          <div class="mt-2">
-                              <p><strong>MAE:</strong> ${model.train_metrics.test_metrics?.mae?.toFixed(2) || '-'}</p>
-                              <p><strong>MAPE:</strong> ${model.train_metrics.test_metrics?.mape?.toFixed(2) || '-'}%</p>
-                          </div>
-                      ` : '<p class="text-warning">Модель не обучена</p>'}
-
-                      <div class="d-flex justify-content-between mt-2">
-                          <button class="btn btn-sm btn-danger" onclick="deleteModel(${model.id})">
-                              Удалить
-                          </button>
-                          <button class="btn btn-sm btn-primary" onclick="makePrediction(${model.id})">
-                              Прогнозировать
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          `;
-      } catch (error) {
-          console.error('Ошибка загрузки модели:', error);
-          detailsDiv.innerHTML = '<div class="alert alert-danger">Ошибка загрузки данных модели</div>';
-      }
-  }
-
-    function getModelTypeDisplay(type) {
-      const types = {
-        'lstm': 'LSTM',
-        'linear': 'Linear Regression',
-        'gru': 'GRU'
-      };
-      return types[type] || type;
-    }
-
-    function showPredictionBlock() {
-      document.getElementById('prediction-block').style.display = 'block';
-    }
-
-    async function trainSelectedModel() {
-      const modelId = document.getElementById('model-select').value;
-      if (!modelId) {
-        showAlert('Выберите модель для обучения', 'warning');
-        return;
-      }
-
-      // Создаем FormData и добавляем файлы
-      const formData = new FormData();
-      formData.append('model_id', modelId);
-
-      // Получаем файлы из формы создания модели
-      const projectFile = document.querySelector('#create-model-form input[name="project_file"]').files[0];
-      const staffFile = document.querySelector('#create-model-form input[name="staff_file"]').files[0];
-      const weatherFile = document.querySelector('#create-model-form input[name="weather_file"]').files[0];
-
-      if (!projectFile || !staffFile || !weatherFile) {
-        showAlert('Загрузите все файлы данных (проект, персонал, погода) перед обучением', 'warning');
-        return;
-      }
-
-      formData.append('project_file', projectFile);
-      formData.append('staff_file', staffFile);
-      formData.append('weather_file', weatherFile);
-
-      try {
-        showAlert('Обучение модели начато... Это может занять несколько минут.', 'info');
-
-        const response = await fetch(`/api/models/${modelId}/train/`, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-          }
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Ошибка обучения модели');
-        }
-
-        const data = await response.json();
-        showAlert('Модель успешно обучена!', 'success');
-        loadModelDetails(modelId); // Обновляем информацию о модели
-
-      } catch (error) {
-        showAlert('Ошибка обучения: ' + error.message, 'danger');
-        console.error('Error:', error);
-      }
-    }
-    async function getPrediction() {
-      const modelId = document.getElementById('model-select').value;
-      if (!modelId) {
-        showAlert('Выберите модель для прогнозирования', 'warning');
-        return;
-      }
-
-      try {
-        showAlert('Выполняется прогнозирование...', 'info');
-
-        const response = await fetch(`/api/models/${modelId}/predict/`, {
-          method: 'POST',
-          headers: {
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Ошибка сервера');
-        }
-
-        const data = await response.json();
-        showPredictionResults(data);
-
-      } catch (error) {
-        showAlert('Ошибка: ' + error.message, 'danger');
-        console.error('Error:', error);
-      }
-    }
-        // Новая логика для работы с моделями
-    async function createAndTrainModel() {
-      const form = document.getElementById('model-form');
-      const formData = new FormData(form);
-      const projectId = document.getElementById('project-select').value;
-
-      if (!projectId) {
-        showAlert('Сначала выберите проект!', 'warning');
-        return;
-      }
-
-      try {
-        // Обновляем статус
-        document.getElementById('status-text').textContent = 'Создание модели...';
-        document.getElementById('model-status').className = 'model-status status-not-trained';
-        document.getElementById('training-progress').style.display = 'block';
-        updateProgress(0);
-
-        // Создание модели
-        const createResponse = await fetch('/api/models/', {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
-          }
-        });
-
-        if (!createResponse.ok) throw new Error('Ошибка создания модели');
-        const model = await createResponse.json();
-        currentModelId = model.id;
-
-        // Обучение модели
-        document.getElementById('status-text').textContent = 'Обучение модели...';
-        const trainResponse = await fetch(`/api/models/${model.id}/train/`, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value
-          }
-        });
-
-        if (!trainResponse.ok) throw new Error('Ошибка обучения модели');
-
-        // Обновление интерфейса
-        document.getElementById('status-text').textContent = 'Модель готова к использованию!';
-        document.getElementById('model-status').className = 'model-status status-trained';
-        document.getElementById('predict-btn').style.display = 'block';
-        document.getElementById('prediction-results').style.display = 'block';
-        document.getElementById('training-progress').style.display = 'none';
-
-      } catch (error) {
-        document.getElementById('status-text').textContent = `Ошибка: ${error.message}`;
-        document.getElementById('model-status').className = 'model-status status-error';
-        document.getElementById('training-progress').style.display = 'none';
-        showAlert(error.message, 'danger');
-      }
-    }
-
-    async function makePrediction() {
-      if (!currentModelId) {
-        showAlert('Сначала создайте и обучите модель', 'warning');
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/models/${currentModelId}/predict/`, {
-          method: 'POST',
-          headers: {
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        const data = await response.json();
-        updatePredictionResults(data);
-
-      } catch (error) {
-        showAlert(`Ошибка прогнозирования: ${error.message}`, 'danger');
-      }
-    }
-
+    // Вспомогательная функция для обновления прогресса
     function updateProgress(percent) {
-      const progressBar = document.querySelector('.progress-bar');
-      progressBar.style.width = `${percent}%`;
-      progressBar.textContent = `${percent}%`;
+        const progressBar = document.querySelector('.progress-bar');
+        if (progressBar) {
+            progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${percent}%`;
+        }
     }
 
     function updatePredictionResults(data) {
@@ -1602,14 +1279,44 @@
         }
       }
     });
+    // Инициализация
+    document.getElementById('project-select').addEventListener('change', function() {
+      loadProjectData(this.value);
+    });
+
+    // Модели
+    function toggleModelForm() {
+      const form = document.getElementById('model-form');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function makePrediction(modelId) {
+      try {
+        showAlert('Прогнозирование...', 'info');
+
+        const response = await fetch(`/api/models/${modelId}/predict/`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const data = await response.json();
+        showPredictionResults(data);
+
+      } catch (error) {
+        showAlert('Ошибка прогноза: ' + error.message, 'danger');
+      }
+    }
 
     function showPredictionResults(data) {
       const resultsDiv = document.getElementById('prediction-results');
       resultsDiv.innerHTML = `
-        <div class="card">
-          <div class="card-header">Результаты прогноза</div>
+        <div class="card mt-3">
+          <div class="card-header">Прогноз на 7 дней</div>
           <div class="card-body">
-            <table class="table">
+            <table class="table table-striped">
               <thead>
                 <tr>
                   <th>Дата</th>
@@ -1630,116 +1337,222 @@
       `;
     }
 
-    async function makePrediction(modelId) {
-      try {
-          showAlert('Прогнозирование...', 'info');
+    async function deleteModel(modelId) {
+        if (!confirm('Удалить модель? Это действие нельзя отменить.')) return;
 
-          const response = await fetch(`/api/models/${modelId}/predict/`, {
+        try {
+            const response = await fetch(`/api/models/${modelId}/delete/`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                showAlert('Модель удалена', 'info');
+                document.querySelector(`#model-select option[value="${modelId}"]`).remove();
+                document.getElementById('model-details').innerHTML = '';
+            } else {
+                const data = await response.json();
+                throw new Error(data.error || 'Ошибка удаления модели');
+            }
+        } catch (error) {
+            showAlert('Ошибка удаления модели: ' + error.message, 'danger');
+        }
+    }
+
+  async function createModel() {
+    try {
+      const form = document.getElementById('create-model-form');
+      if (!form) {
+        throw new Error('Форма не найдена');
+      }
+
+      const formData = new FormData(form);
+      const projectSelect = document.getElementById('project-select');
+
+      if (!projectSelect) {
+        throw new Error('Элемент выбора проекта не найден');
+      }
+
+      const projectId = projectSelect.value;
+      if (!projectId) {
+        showAlert('Сначала выберите проект!', 'warning');
+        return;
+      }
+
+      // Получаем элементы формы
+      const getFormValue = (name) => {
+        const element = form.querySelector(`[name="${name}"]`);
+        if (!element) {
+          console.warn(`Элемент с name="${name}" не найден`);
+          return null;
+        }
+        return element.value;
+      };
+
+      // Добавляем параметры
+      formData.append('project_id', projectId);
+      formData.append('num_epoch', getFormValue('num_epoch') || 15);
+      formData.append('batch_size', getFormValue('batch_size') || 32);
+      formData.append('slide_window', getFormValue('slide_window') || 7);
+
+      // Для model-type-select (если он есть)
+      const modelTypeSelect = document.getElementById('model-type-select');
+      if (modelTypeSelect) {
+        formData.append('model_type', modelTypeSelect.value || 'LSTM');
+      }
+
+      const csrfToken = form.querySelector('[name=csrfmiddlewaretoken]');
+      if (!csrfToken) {
+        throw new Error('CSRF токен не найден');
+      }
+
+      const response = await fetch('/api/models/', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-CSRFToken': csrfToken.value
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Ошибка сервера');
+      }
+
+      const data = await response.json();
+      showAlert('Модель успешно создана!', 'success');
+      toggleModelForm();
+      updateModelSelect(data.model_id, data.profile_name);
+
+    } catch (error) {
+      console.error('Ошибка создания модели:', error);
+      showAlert('Ошибка: ' + error.message, 'danger');
+    }
+  }
+
+    function updateModelSelect(modelId, profileName) {
+      const select = document.getElementById('model-select');
+      const option = document.createElement('option');
+      option.value = modelId;
+      option.textContent = profileName;
+      select.appendChild(option);
+      select.value = modelId;
+      loadModelDetails(modelId);
+    }
+
+    async function loadModelDetails(modelId) {
+        const detailsDiv = document.getElementById('model-details');
+        if (!detailsDiv) return;
+
+        try {
+            if (!modelId) {
+                detailsDiv.innerHTML = '';
+                return;
+            }
+
+            const response = await fetch(`/api/models/${modelId}/`);
+            const model = await response.json();
+
+            // Словарь для преобразования типов моделей в читаемые названия
+            const modelTypeNames = {
+                'lstm': 'LSTM',
+                'gru': 'GRU',
+                'rnn': 'RNN',
+                'bidirectional': 'Bidirectional',
+                'cnn': 'CNN',
+                'tcn': 'TCN'
+            };
+
+            // Получаем читаемое имя типа модели
+            const modelTypeName = modelTypeNames[model.model_type] || model.model_type;
+
+            detailsDiv.innerHTML = `
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h5>${model.profile_name}</h5>
+                        <p><strong>Тип:</strong> ${modelTypeName}</p>
+                        <p><strong>Эпохи:</strong> ${model.num_epoch}</p>
+                        <p><strong>Батч:</strong> ${model.batch_size}</p>
+                        <p><strong>Горизонт:</strong> ${model.slide_window} дней</p>
+                        <p><strong>Версия фреймворка:</strong> ${model.framework_version}</p>
+                        <p><strong>Создано:</strong> ${new Date(model.created_at).toLocaleString()}</p>
+
+                        ${model.train_metrics ? `
+                            <div class="mt-3">
+                                <h6>Метрики обучения</h6>
+                                <p><strong>MAPE:</strong> ${model.train_metrics.test_metrics?.mape?.toFixed(2) || '-'}%</p>
+                            </div>
+                        ` : '<p class="text-warning mt-3">Модель не обучена</p>'}
+
+                        <div class="d-flex justify-content-between mt-3">
+                            <button class="btn btn-sm btn-danger" onclick="deleteModel(${model.id})">
+                                Удалить
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="makePrediction(${model.id})">
+                                Прогнозировать
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            detailsDiv.innerHTML = '<div class="alert alert-danger">Ошибка загрузки данных модели</div>';
+            console.error('Ошибка загрузки деталей модели:', error);
+        }
+    }
+
+  async function trainSelectedModel() {
+      const modelId = document.getElementById('model-select').value;
+
+      if (!modelId) {
+          showAlert('Сначала выберите модель!', 'warning');
+          return;
+      }
+
+      try {
+
+          const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+          const formData = new FormData();
+          const response = await fetch(`/api/models/${modelId}/train/`, {
               method: 'POST',
+              body: formData,
               headers: {
-                  'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-                  'Content-Type': 'application/json'
+                  'X-CSRFToken': csrfToken
               }
           });
-
           const data = await response.json();
 
-          document.getElementById('prediction-results').innerHTML = `
-              <div class="card mt-3">
-                  <div class="card-body">
-                      <h5>Прогноз на 7 дней</h5>
-                      ${data.forecast.map((val, i) => `
-                          <p>День ${i+1}: ${val.toFixed(2)}%</p>
-                      `).join('')}
-                  </div>
-              </div>
-          `;
-
+          if (response.ok) {
+              showAlert('Модель успешно обучена!', 'success');
+              loadModelDetails(modelId);
+          } else {
+              throw new Error(data.error || 'Ошибка обучения модели');
+          }
       } catch (error) {
-          showAlert('Ошибка прогноза: ' + error.message, 'danger');
+          showAlert('Ошибка обучения: ' + error.message, 'danger');
+          console.error('Ошибка обучения модели:', error);
       }
   }
 
-    function displayPredictionResults(forecast, dates) {
-      const resultsDiv = document.getElementById('prediction-results');
-      resultsDiv.innerHTML = `
-        <div class="card mt-3">
-          <div class="card-header">Прогноз на 7 дней</div>
-          <div class="card-body">
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th>Дата</th>
-                  <th>Прогнозируемый прогресс</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${forecast.map((value, i) => `
-                  <tr>
-                    <td>${dates[i]}</td>
-                    <td>${value.toFixed(2)}%</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
+    function showAlert(message, type) {
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type} alert-dismissible fade show`;
+      alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
       `;
-    }
-
-    function displayPredictionResults(forecast) {
-      const resultsDiv = document.getElementById('prediction-results');
-      resultsDiv.innerHTML = `
-        <h5>Результаты прогнозирования:</h5>
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>День</th>
-              <th>Прогнозируемая готовность</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${forecast.map((value, index) => `
-              <tr>
-                <td>${index + 1}</td>
-                <td>${value.toFixed(2)}%</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
-    }
-
-    async function deleteModel(modelId) {
-      if (!confirm('Удалить модель? Это действие нельзя отменить.')) return;
-
-      try {
-        const response = await fetch(`/api/models/${modelId}/`, {
-          method: 'DELETE',
-          headers: {
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-          }
-        });
-
-        if (response.ok) {
-          showAlert('Модель удалена', 'info');
-          document.querySelector(`#model-select option[value="${modelId}"]`).remove();
-          document.getElementById('model-details').innerHTML = '';
-          document.getElementById('prediction-block').style.display = 'none';
-        } else {
-          const data = await response.json();
-          throw new Error(data.error || 'Ошибка удаления модели');
-        }
-      } catch (error) {
-        showAlert('Ошибка удаления модели: ' + error.message, 'danger');
-        console.error('Error:', error);
-      }
+      document.querySelector('.container').prepend(alert);
+      setTimeout(() => alert.remove(), 3000);
     }
 
     // Инициализация
     document.getElementById('project-select').addEventListener('change', function() {
       loadProjectData(this.value);
     });
+
   </script>
 </body>
 </html>

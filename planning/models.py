@@ -1,6 +1,4 @@
 from audioop import reverse
-from datetime import datetime
-
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 
@@ -189,70 +187,6 @@ class Staff(models.Model):
     class Meta:
         db_table = 'Staff'
 
-
-from django.db import models
-from django.db.models import JSONField  # Используем встроенный JSONField
-from datetime import datetime
-import tensorflow as tf
-
-
-class Models(models.Model):
-    NEURAL_CHOICES = [
-        ('lstm', 'LSTM'),
-        ('linear', 'Linear Regression'),
-        ('gru', 'GRU'),
-    ]
-
-    # Основные параметры модели
-    profile_name = models.CharField(max_length=50, verbose_name='Название профиля')
-    project = models.ForeignKey(
-        'ConstructionProject',
-        on_delete=models.CASCADE,
-        db_column='project_id',
-        verbose_name='Проект'
-    )
-
-    # Параметры обучения
-    num_epoch = models.IntegerField(verbose_name='Количество эпох')
-    batch_size = models.IntegerField(verbose_name='Размер батча')
-    slide_window = models.IntegerField(verbose_name='Горизонт прогнозирования (дней)')
-
-    # Тип нейросети
-    name_neural = models.CharField(
-        max_length=30,
-        choices=NEURAL_CHOICES,
-        verbose_name='Тип нейросети'
-    )
-
-    # Данные модели
-    model_data = models.BinaryField(verbose_name='Данные модели')  # Для хранения весов
-
-    # Конфигурация и метрики (используем встроенный JSONField)
-    model_config = JSONField(default=dict, verbose_name='Конфигурация модели')
-    train_metrics = JSONField(default=dict, verbose_name='Метрики обучения')
-
-
-    # Системные поля
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
-    framework_version = models.CharField(
-        max_length=50,
-        default=tf.__version__,
-        verbose_name='Версия фреймворка'
-    )
-    model_type = models.CharField(
-        max_length=20,
-        default='keras',
-        verbose_name='Тип модели'
-    )
-
-    class Meta:
-        db_table = 'Models'
-        verbose_name = 'Модель нейронной сети'
-        verbose_name_plural = 'Модели нейронных сетей'
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.profile_name} ({self.get_name_neural_display()})"
 class TaskStandards(models.Model):
     id = models.AutoField(primary_key=True)
     project = models.ForeignKey(
@@ -264,7 +198,7 @@ class TaskStandards(models.Model):
         Task,
         on_delete=models.CASCADE,
         db_column='task_id',
-        related_name='task_standards'  # Важно: именно такое имя связи
+        related_name='task_standards'
     )
     man_hours = models.FloatField()
     machine_hours = models.FloatField()
@@ -272,3 +206,23 @@ class TaskStandards(models.Model):
 
     class Meta:
         db_table = 'Task_Standards'
+
+class Models(models.Model):
+    profile_name = models.CharField(max_length=50)
+    project_id = models.IntegerField()
+    num_epoch = models.IntegerField()
+    batch_size = models.IntegerField()
+    slide_window = models.IntegerField()
+   # name_neural = models.CharField(max_length=255)
+    model_type = models.CharField(max_length=255)
+    model_config = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    train_metrics = models.JSONField(default=dict)
+    framework_version = models.CharField(max_length=255, default='2.12.0')
+    model_data = models.BinaryField()
+
+    def __str__(self):
+        return self.profile_name
+
+    class Meta:
+        db_table = 'Models'
