@@ -1,12 +1,9 @@
 import tempfile
 import traceback
 from venv import logger
-
 from rest_framework import viewsets, status, request
 from rest_framework.decorators import action
-from datetime import datetime, timezone
-import joblib
-from io import BytesIO
+from datetime import timezone
 from .file_utils import get_temp_files, delete_temp_files
 from .file_utils import save_files_to_temp
 from .ml.db_preprocess import get_last_7_days_data, get_full_project_data
@@ -14,16 +11,17 @@ from .ml.models import forecast, Model, model_to_bytes, evaluate_model_performan
 from .ml.preprocess import prepare_data, preprocess_to_model
 from rest_framework.serializers import ModelSerializer
 from django.shortcuts import render
-from datetime import timedelta
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 import pandas as pd
-import io
 import tensorflow as tf
 from django.utils import timezone
+import joblib
+from io import BytesIO
+import numpy as np
 from .models import (
     ConstructionProject,
     Resource,
@@ -49,7 +47,6 @@ class ConstructionProjectViewSet(viewsets.ModelViewSet):
     serializer_class = ConstructionProjectSerializer
 
     def update_dates(self, project):
-        """Обновляет даты проекта на основе задач"""
         tasks = project.task_set.all()
         if tasks.exists():
             project.start_date = tasks.earliest('start_date').start_date
@@ -96,8 +93,6 @@ class ModelsViewSet(viewsets.ModelViewSet):
             return Response({'status': 'retrained on excel'})
         return Response({'status': 'retrained on project'})
 
-
-# API Endpoints
 @api_view(['GET'])
 def planner_view(request):
     context = {
@@ -110,7 +105,7 @@ def planner_view(request):
 
 @api_view(['POST'])
 def create_project(request):
-    """Создание проекта с проверкой"""
+
     try:
         name = request.data.get('name')
         if not name:
@@ -132,7 +127,7 @@ def create_project(request):
         return Response({'error': str(e)}, status=400)
 @api_view(['POST'])
 def create_task(request):
-    """Создание задачи (упрощенная версия)"""
+
     try:
         data = request.data
         task = Task.objects.create(
@@ -187,20 +182,14 @@ def project_progress_chart(request, project_id):
         .order_by('date')
         .values('date', 'cumulative_progress')
     )
-
-    # Рассчитываем плановый прогресс (если нужно)
     #planned_data = calculate_planned_progress(project_id)
-
     return Response({
         'actual': list(progress_data),
-        'planned': planned_data,
+       # 'planned': planned_data,
         'status': 'success'
     })
 @api_view(['POST'])
 def update_progress_cache(request, project_id):
-    """
-    Запускает пересчёт кэша прогресса
-    """
     try:
         count = calculate_project_progress(project_id)
         return Response({
@@ -216,7 +205,6 @@ def update_progress_cache(request, project_id):
 @api_view(['GET'])
 def project_progress(request, project_id):
     try:
-        # Пересчитываем прогресс перед получением данных
         from .services import calculate_project_progress
         calculate_project_progress(project_id)
 
@@ -235,7 +223,7 @@ def project_progress(request, project_id):
                 }
                 for item in progress_data
             ],
-            'predicted': [],  # Пока оставляем пустым
+            'predicted': [],
             'status': 'success'
         })
     except Exception as e:
@@ -257,21 +245,21 @@ def calculate_progress(request, project_id):
         }, status=400)
 @api_view(['GET'])
 def get_tasks(request):
-    """Получение задач проекта для форм"""
+
     project_id = request.GET.get('project_id')
     tasks = Task.objects.filter(project_id=project_id).values('task_id', 'description')  # Используем task_id вместо id
     return Response(list(tasks))
 
 @api_view(['GET'])
 def get_projects(request):
-    """Получение списка всех проектов"""
+
     projects = ConstructionProject.objects.all()
     serializer = ConstructionProjectSerializer(projects, many=True)
     return Response(serializer.data)
 
 @api_view(['GET'])
 def project_tasks(request, project_id):
-    """Получение задач проекта"""
+
     tasks = Task.objects.filter(project_id=project_id)
     return Response({
         'tasks': [
@@ -289,7 +277,7 @@ def project_tasks(request, project_id):
     })
 @api_view(['GET', 'PUT', 'DELETE'])
 def task_detail(request, task_id):
-    """Управление конкретной задачей"""
+
     task = get_object_or_404(Task, pk=task_id)
 
     if request.method == 'GET':
@@ -308,7 +296,7 @@ def task_detail(request, task_id):
         return Response(status=204)
 @api_view(['POST'])
 def task_list(request):
-    """Создание новой задачи"""
+
     serializer = TaskSerializer(data=request.data)
     if serializer.is_valid():
         serializer.save()
@@ -318,7 +306,7 @@ def task_list(request):
 
 @api_view(['GET', 'DELETE'])
 def project_detail(request, project_id):
-    """Управление конкретным проектом"""
+
     project = get_object_or_404(ConstructionProject, pk=project_id)
 
     if request.method == 'GET':
@@ -332,7 +320,7 @@ def project_detail(request, project_id):
 
 @api_view(['GET'])
 def get_projects(request):
-    """Получение списка всех проектов"""
+
     projects = ConstructionProject.objects.all()
     serializer = ConstructionProjectSerializer(projects, many=True)
     return Response(serializer.data)
@@ -340,7 +328,7 @@ def get_projects(request):
 
 @api_view(['GET', 'DELETE'])
 def project_detail(request, project_id):
-    """Управление конкретным проектом"""
+
     project = get_object_or_404(ConstructionProject, pk=project_id)
 
     if request.method == 'GET':
@@ -354,7 +342,7 @@ def project_detail(request, project_id):
 
 @api_view(['GET'])
 def project_tasks(request, project_id):
-    """Получение задач конкретного проекта"""
+
     tasks = Task.objects.filter(project_id=project_id)
     serializer = TaskSerializer(tasks, many=True)
     return Response(serializer.data)
@@ -362,7 +350,7 @@ def project_tasks(request, project_id):
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def task_detail(request, task_id):
-    """Управление конкретной задачей"""
+
     task = get_object_or_404(Task, pk=task_id)
 
     if request.method == 'GET':
@@ -383,7 +371,7 @@ def task_detail(request, task_id):
 
 @api_view(['GET', 'DELETE'])
 def model_detail(request, model_id):
-    """Управление конкретной моделью"""
+
     model = get_object_or_404(Models, pk=model_id)
 
     if request.method == 'GET':
@@ -397,7 +385,7 @@ def model_detail(request, model_id):
 
 @api_view(['GET'])
 def gantt_data(request, project_id):
-    """Данные для диаграммы Ганта"""
+
     tasks = Task.objects.filter(project_id=project_id).values(
         'task_id', 'description', 'start_date', 'end_date', 'work_type'
     )
@@ -448,7 +436,7 @@ def get_weather(request):
 def save_progress(request):
     try:
         data = request.data
-        # Создаем запись о выполнении
+
         progress = ResourceRemains.objects.create(
             date=data['date'],
             output=data['output'],
@@ -456,8 +444,6 @@ def save_progress(request):
             task_id=data['task_id']
         )
 
-
-        # Обновляем остаток ресурса
         resource = Resource.objects.get(pk=data['resource_id'])
         resource.remains -= float(data['output'])
         resource.save()
@@ -479,7 +465,7 @@ def model_detail(request, model_id):
     except Models.DoesNotExist:
         return Response({'error': 'Model not found'}, status=404)
 
-# Для удаления модели
+
 @api_view(['DELETE'])
 def delete_model(request, model_id):
     try:
@@ -506,7 +492,6 @@ def create_model(request):
             if file_key not in files:
                 return Response({'error': f'Missing file: {file_key}'}, status=400)
 
-        # Создаем запись модели
         model = Models.objects.create(
             profile_name=data['profile_name'],
             project_id=data['project_id'],
@@ -518,7 +503,7 @@ def create_model(request):
             framework_version=tf.__version__
         )
 
-        # Сохраняем файлы во временную директорию
+
         save_files_to_temp(files, model.id)
 
         return Response({
@@ -535,12 +520,11 @@ def train_model(request, model_id):
     try:
         print(f"\n=== Starting training for model {model_id} ===")
 
-        # 1. Получаем модель
+
         model = Models.objects.get(pk=model_id)
         print(f"Model params - epochs: {model.num_epoch}, batch: {model.batch_size}, window: {model.slide_window}")
         print("Model retrieved:", model.id)
 
-        # 2. Получаем пути к файлам
         file_paths = get_temp_files(model_id)
         print("File paths:", file_paths)
 
@@ -548,7 +532,7 @@ def train_model(request, model_id):
             print("Error: No files found")
             return Response({'error': 'Files not found for training'}, status=400)
 
-        # 3. Чтение файлов
+
         try:
             print("\nReading files...")
             project_data = pd.read_excel(file_paths['project_file'], engine='openpyxl')
@@ -561,7 +545,7 @@ def train_model(request, model_id):
             print("Error reading files:", str(e))
             return Response({'error': f'Error reading files: {str(e)}'}, status=400)
 
-        # 4. Подготовка данных
+
         try:
             print("\nPreparing data...")
             open_project_data = get_full_project_data(model.project_id)
@@ -573,14 +557,14 @@ def train_model(request, model_id):
             print("Error preparing data:", str(e))
             return Response({'error': f'Data preparation failed: {str(e)}'}, status=400)
 
-        # Преобразование данных для модели
+
         train_x_combined, train_y_combined, test_x_combined, test_y_combined, scaler = preprocess_to_model(prepared_data, model.slide_window)
         print("Train data prepared successfully")
-        feature_names = prepared_data[0].columns.tolist()  # Получаем список всех признаков
+        feature_names = prepared_data[0].columns.tolist()
         model_config = {
             'feature_names': feature_names,
             'n_features': len(feature_names),
-            'target_feature': 'CUM_%'  # Указываем целевую переменную
+            'target_feature': 'CUM_%'
         }
         model_creator = Model()
         model_instance = model_creator.create_model(
@@ -590,17 +574,18 @@ def train_model(request, model_id):
             n_outputs=train_y_combined.shape[1]
         )
         print("Model created")
-        # Обучение модели
+
         model_instance, history = model_creator.train_model(
             model_instance,
             train_x_combined,
             train_y_combined,
-            n_outputs=model.slide_window,
-            epochs=model.num_epoch,  # Используем сохранённое значение
+            #n_outputs=model.slide_window,
+            n_outputs=train_y_combined.shape[1],
+            epochs=model.num_epoch,
             batch_size=model.batch_size
         )
         print("Success!")
-        # Оценка модели
+
         test_rmse, test_scores = model_creator.evaluate_model(
             model_instance,
             train_x_combined,
@@ -609,7 +594,7 @@ def train_model(request, model_id):
             test_y_combined
         )
         print("Scores", test_rmse, test_scores)
-        # Сохранение модели и метрик в БД
+
         metrics = evaluate_model_performance(model_instance,
                                             train_x_combined,
                                             train_y_combined,
@@ -649,15 +634,9 @@ def train_model(request, model_id):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
-
-import joblib
-from io import BytesIO
-import numpy as np
-
 def calculate_mape(actual, predicted):
-    """Рассчитывает Mean Absolute Percentage Error (MAPE)"""
+
     actual, predicted = np.array(actual), np.array(predicted)
-    # Фильтруем нулевые значения, чтобы избежать деления на ноль
     mask = actual != 0
     if sum(mask) == 0:
         return None
@@ -666,76 +645,61 @@ def calculate_mape(actual, predicted):
 @api_view(['POST'])
 def model_predict(request, model_id):
     try:
-        # 1. Загрузка модели, скалера и конфигурации
+
         loaded_model, scaler, model_config = load_from_db(model_id)
         model = Models.objects.get(pk=model_id)
-
-        # 2. Получение данных (7 дней)
         last_data = get_last_7_days_data(model.project_id, model.slide_window)
-
-        # 3. Получаем список признаков из конфигурации
         feature_names = model_config.get('feature_names', [])
         if not feature_names:
             raise ValueError("Feature names not found in model config")
-        # В пункте 3 после получения feature_names из конфигурации:
         if 'is_real' not in feature_names:
             feature_names.append('is_real')
-
-        # 4. Добавляем отсутствующие признаки
         for feature in feature_names:
             if feature not in last_data.columns:
                 if feature == 'is_real':
-                    last_data[feature] = 1  # Для реальных данных
+                    last_data[feature] = 1
                 else:
-                    last_data[feature] = 0.0  # Для остальных
-        # После пункта 4 (добавления отсутствующих признаков) и перед пунктом 5:
+                    last_data[feature] = 0.0
         if 'is_real' not in last_data.columns:
-            last_data['is_real'] = 1  # 1 для реальных данных, 0 для синтетических
-        # 5. Упорядочиваем признаки как при обучении
+            last_data['is_real'] = 1
+
         X = last_data[feature_names]
 
-        # 6. Масштабируем только числовые признаки (кроме is_real)
         numeric_features = [f for f in feature_names if f != 'is_real']
         X[numeric_features] = scaler.transform(X[numeric_features])
 
-        # 7. Изменяем форму для модели (1, 7, n_features)
         X = X.values.reshape((1, model.slide_window, -1))
 
-        # 8. Проверка совместимости
         if X.shape[2] != loaded_model.input_shape[-1]:
             raise ValueError(
                 f"Shape mismatch: Model expects {loaded_model.input_shape[-1]} features, "
                 f"got {X.shape[2]}. Features: {feature_names}"
             )
 
-        # 9-12. Прогнозирование и обработка результатов
         horizon = model.slide_window
         predictions = []
-        current_data = X.copy()  # Копируем исходные данные
+        current_data = X.copy()
 
         for _ in range(horizon):
-            # Получаем предсказание
+
             pred = loaded_model.predict(current_data)
 
-            # Сохраняем только целевое значение (CUM_%)
-            if pred.ndim == 3:  # Если модель возвращает 3D тензор
+            if pred.ndim == 3:
                 pred_value = pred[0, 0, 0]
             else:
                 pred_value = pred[0, 0]
             predictions.append(pred_value)
 
-            # Обновляем данные для следующего шага
+
             current_data = np.roll(current_data, -1, axis=1)
             target_idx = feature_names.index(model_config['target_feature'])
             current_data[0, -1, target_idx] = pred_value
 
-        # Обратное преобразование прогнозов
         dummy = np.zeros((len(predictions), len(scaler.feature_names_in_)))
         target_scaler_idx = list(scaler.feature_names_in_).index(model_config['target_feature'])
         dummy[:, target_scaler_idx] = predictions
         predictions = scaler.inverse_transform(dummy)[:, target_scaler_idx]
 
-        # Постобработка и форматирование результатов
         predictions = np.clip(predictions, 0, 100).tolist()
         last_date = pd.to_datetime(last_data.index[-1]).date()
         dates = generate_future_dates(last_date, horizon)

@@ -80,7 +80,7 @@ class ProjectProgress(models.Model):
 
 
     class Meta:
-        db_table = 'project_progress'  # Используем lowercase для совместимости
+        db_table = 'project_progress'
         unique_together = ('project', 'date')
         verbose_name_plural = 'Project Progress'
 
@@ -116,22 +116,22 @@ class Task(models.Model):
 
     @property
     def planned_amount(self):
-        """Плановое количество из связанного ресурса"""
+
         return self.resource.quantity
 
     @property
     def remains(self):
-        """Остаток из связанного ресурса"""
+
         return self.resource.remains
 
     @property
     def weight(self):
-        """Вес задачи в нормочасах"""
+
         return (self.man_hours or 0) + (self.machine_hours or 0)
 
     @property
     def progress_per_unit(self):
-        """Прогресс на единицу объёма"""
+
         if self.resource.quantity > 0:
             return self.weight / self.resource.quantity
         return 0
@@ -228,7 +228,6 @@ class Models(models.Model):
     num_epoch = models.IntegerField()
     batch_size = models.IntegerField()
     slide_window = models.IntegerField()
-   # name_neural = models.CharField(max_length=255)
     model_type = models.CharField(max_length=255)
     model_config = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)

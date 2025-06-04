@@ -13,7 +13,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <style>
-
     .form-container { display: none; }
     #tasks-block, #progress-block { transition: all 0.3s ease; }
     .task-card {
@@ -130,11 +129,11 @@
     }
 
 
-// Стили для графика (добавьте в ваш существующий блок стилей)
+// Стили для графика
     #progress-chart-container {
         height: 400px;
         width: 100%;
-        min-height: 400px; /* Фиксированная высота */
+        min-height: 400px;
         position: relative;
         background: white;
         border: 1px solid #dee2e6;
@@ -146,7 +145,7 @@
     #progress-chart {
         width: 100% !important;
         height: 100% !important;
-        min-height: 370px; /* Сохраняем пропорции */
+        min-height: 370px;
     }
     .progress-controls {
       margin-bottom: 10px;
@@ -203,6 +202,7 @@
         </div>
       </div>
       <div class="card-body">
+
         <!-- Форма создания/редактирования задачи -->
         <div id="task-form-container" style="display:none;" class="mb-4">
           <form id="task-form">
@@ -441,17 +441,15 @@
     </div>
 
   <script>
-    // Глобальные переменные для графика
+
     let progressChart = null;
     let allProgressData = [];
     let predictedData = [];
 
-
-    // Инициализация Chart.js с адаптером дат
     function initializeChartJS() {
-      // Регистрируем необходимые компоненты
+
       Chart.register(
-        ChartZoom, // Плагин масштабирования
+        ChartZoom,
         {
           id: 'date_adapter',
           beforeInit: function(chart) {
@@ -467,7 +465,7 @@
       );
     }
 
-    // Функция загрузки данных прогресса
+
     function loadProgressChart() {
       const projectId = document.getElementById('project-select').value;
       if (!projectId) return;
@@ -492,23 +490,23 @@
           console.error('Error loading progress data:', error);
           showAlert('Ошибка загрузки данных прогресса: ' + error.message, 'danger');
 
-          // Создаем пустой график для предотвращения ошибок
+
           allProgressData = [];
           predictedData = [];
           renderProgressChart();
         });
     }
 
-    // Функция отрисовки графика
+
     function renderProgressChart(timeRange = 'all') {
       const ctx = document.getElementById('progress-chart');
 
-      // Уничтожаем предыдущий график, если он существует
+
       if (progressChart) {
         progressChart.destroy();
       }
 
-      // Фильтруем данные по выбранному диапазону
+
       const filteredData = filterDataByTimeRange(allProgressData, timeRange);
       const filteredPredicted = filterDataByTimeRange(predictedData, timeRange);
 
@@ -606,7 +604,7 @@
       });
     }
 
-    // Функция определения единицы времени для оси X
+
     function getTimeUnit(timeRange) {
       switch(timeRange) {
         case '7days': return 'day';
@@ -616,7 +614,7 @@
       }
     }
 
-    // Фильтрация данных по временному диапазону
+
     function filterDataByTimeRange(data, timeRange) {
       if (!data.length || timeRange === 'all') return data;
 
@@ -631,7 +629,7 @@
           cutoffDate.setDate(now.getDate() - 7);
           break;
         case '7days':
-          // Для 7 дней показываем только последние 7 дней
+
           return data.slice(-7);
       }
 
@@ -641,7 +639,7 @@
       });
     }
 
-    // Обработчики событий
+
 
     document.getElementById('zoom-in-progress').addEventListener('click', () => {
       if (progressChart) {
@@ -663,7 +661,7 @@
       renderProgressChart(this.value);
     });
 
-    // Инициализация при загрузке страницы
+
     initializeChartJS();
     document.getElementById('project-select').addEventListener('change', function() {
       if (this.value) {
@@ -671,7 +669,7 @@
       }
     });
 
-    // Если проект уже выбран при загрузке страницы
+
     if (document.getElementById('project-select').value) {
       loadProgressChart();
     }
@@ -682,13 +680,13 @@
   </div>
 
   <script>
-    // Обновляем информацию о ресурсе при выборе
+
     document.getElementById('resource-select').addEventListener('change', function() {
       const selectedOption = this.options[this.selectedIndex];
       document.getElementById('resource-unit').value = selectedOption.dataset.unit || '';
     });
 
-    // Загрузка погоды
+
     async function loadWeather(date) {
         if (!date) return;
 
@@ -707,7 +705,7 @@
 
             const data = await response.json();
 
-            // Проверка структуры ответа
+
             if (!data.main || !data.wind) {
                 throw new Error("Некорректный ответ API");
             }
@@ -724,7 +722,7 @@
         }
     }
 
-    // Обновляем информацию о ресурсе задачи
+
     function updateTaskResourceInfo(select) {
         const selectedOption = select.options[select.selectedIndex];
         if (!selectedOption || !selectedOption.value) return;
@@ -737,7 +735,7 @@
             `${selectedOption.dataset.remains || 0} ${selectedOption.dataset.unit || ''}`;
     }
 
-    // Сохранение прогресса
+
     function saveProgress() {
       const formData = {
         date: document.getElementById('progress-date').value,
@@ -804,7 +802,7 @@
       .then(response => response.json())
       .then(data => {
         if (data.project_id) {
-          // Добавляем новый проект в select
+
           const select = document.getElementById('project-select');
           const option = document.createElement('option');
           option.value = data.project_id;
@@ -829,7 +827,7 @@
           }
         })
         .then(() => {
-          // Удаляем проект из select
+
           document.querySelector(`#project-select option[value="${projectId}"]`).remove();
           document.getElementById('project-select').value = '';
           document.getElementById('tasks-block').style.display = 'none';
@@ -851,7 +849,7 @@
       document.getElementById('task-project-id').value = projectId;
 
       if (taskId) {
-        // Режим редактирования
+
         fetch(`/api/tasks/${taskId}/`)
           .then(response => response.json())
           .then(task => {
@@ -865,7 +863,7 @@
             form.querySelector('[name="planned_amount"]').value = task.planned_amount;
             formContainer.style.display = 'block';
 
-            // Устанавливаем единицу измерения
+
             const resourceSelect = document.getElementById('resource-select');
             const selectedOption = resourceSelect.querySelector(`option[value="${task.resource_id}"]`);
             if (selectedOption) {
@@ -873,7 +871,7 @@
             }
           });
       } else {
-        // Режим создания
+
         document.getElementById('edit-task-id').value = '';
         form.reset();
         document.getElementById('resource-unit').value = '';
@@ -889,7 +887,7 @@
     }
 
     function saveTask() {
-      // Проверка что дата окончания рассчитана
+
       if (!document.querySelector('[name="end_date"]').value) {
         alert('Пожалуйста, укажите дату начала и длительность');
         return;
@@ -962,12 +960,12 @@
             </div>
           `).join('');
 
-          // Обновляем список зависимостей
+
           const dependencySelect = document.getElementById('dependency-select');
           dependencySelect.innerHTML = '<option value="">Нет</option>' +
             tasks.map(t => `<option value="${t.task_id}">${t.description}</option>`).join('');
 
-          // Обновляем список задач для прогресса
+
           const progressSelect = document.getElementById('progress-task');
           progressSelect.innerHTML = '<option value="">Выберите задачу</option>' +
             tasks.map(t => `<option value="${t.task_id}"
@@ -983,7 +981,7 @@
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr);
-      // Формат: "день.месяц.год" (сокращенный год - последние 2 цифры)
+
       return `${date.getDate()}.${date.getMonth()+1}.${date.getFullYear().toString().slice(-2)}`;
     }
 
@@ -1023,8 +1021,8 @@
       }
     }
 
-    let globalGantt = null; // Добавляем глобальную переменную для хранения экземпляра
-    let allTasks = []; // Сохраняем все задачи
+    let globalGantt = null;
+    let allTasks = [];
 
     function loadGanttChart() {
       const projectId = document.getElementById('project-select').value;
@@ -1045,7 +1043,7 @@
             return;
           }
 
-          // Сохраняем все задачи
+
           allTasks = data.tasks.map(task => ({
             id: task.task_id.toString(),
             name: task.description,
@@ -1057,7 +1055,7 @@
               .map(d => d.task_id.toString())
           }));
 
-          // Создаем Гант с текущими задачами
+
           createGanttInstance(allTasks);
         })
         .catch(error => {
@@ -1093,9 +1091,9 @@
         on_click: function(task) {
           console.log("Задача выбрана:", task);
         },
-        // Добавляем кастомный формат для tooltip
+
         custom_popup_html: function(task) {
-          // Форматируем даты в нужный формат (день.месяц.год)
+
           const formatDate = (dateStr) => {
             const date = new Date(dateStr);
             return date.toLocaleDateString('ru-RU');
@@ -1130,24 +1128,24 @@
 
       document.getElementById('gantt-container').prepend(controls);
 
-      // Обработчики масштабирования
+
       controls.querySelector('.zoom-in').addEventListener('click', () => {
         globalGantt.options.column_width = Math.min(100, globalGantt.options.column_width * 1.2);
-        globalGantt.refresh(allTasks); // Обновляем со всеми задачами
+        globalGantt.refresh(allTasks);
       });
 
       controls.querySelector('.zoom-out').addEventListener('click', () => {
         globalGantt.options.column_width = Math.max(10, globalGantt.options.column_width * 0.8);
-        globalGantt.refresh(allTasks); // Обновляем со всеми задачами
+        globalGantt.refresh(allTasks);
       });
 
-      // Переключение режимов просмотра
+
       controls.querySelector('.view-mode').addEventListener('change', function() {
         globalGantt.change_view_mode(this.value);
       });
     }
 
-    // Автоматический расчет даты окончания
+
     document.querySelector('[name="start_date"]').addEventListener('change', function() {
       calculateEndDate();
     });
@@ -1171,18 +1169,18 @@
       const endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + durationDays);
 
-      // Форматируем дату в формат YYYY-MM-DD
+
       const formattedDate = endDate.toISOString().split('T')[0];
       endDateInput.value = formattedDate;
     }
 
-    // Блокируем ручное редактирование даты окончания
+
     document.querySelector('[name="end_date"]').addEventListener('focus', function(e) {
       e.target.blur();
       alert('Дата окончания рассчитывается автоматически на основе даты начала и длительности');
     });
 
-    // Вспомогательные функции
+
     function showAlert(message, type) {
       const alert = document.createElement('div');
       alert.className = `alert alert-${type} alert-dismissible fade show`;
@@ -1201,12 +1199,12 @@
       }, 3000);
     }
 
-    // Вспомогательные функции
+
     function getCSRFToken() {
         return document.querySelector('[name=csrfmiddlewaretoken]').value;
     }
 
-    // Вспомогательная функция для обновления прогресса
+
     function updateProgress(percent) {
         const progressBar = document.querySelector('.progress-bar');
         if (progressBar) {
@@ -1228,7 +1226,7 @@
         tableBody.appendChild(row);
       });
 
-      // Обновление графика
+
       if (predictionChart) predictionChart.destroy();
 
       const ctx = document.getElementById('prediction-chart').getContext('2d');
@@ -1258,7 +1256,7 @@
       });
     }
 
-    // Общие вспомогательные функции
+
     function showAlert(message, type) {
       const alert = document.createElement('div');
       alert.className = `alert alert-${type} alert-dismissible fade show`;
@@ -1270,7 +1268,7 @@
       setTimeout(() => alert.remove(), 3000);
     }
 
-    // Инициализация графиков
+
     Chart.register(ChartZoom, {
       id: 'date_adapter',
       beforeInit: function(chart) {
@@ -1279,12 +1277,12 @@
         }
       }
     });
-    // Инициализация
+
     document.getElementById('project-select').addEventListener('change', function() {
       loadProjectData(this.value);
     });
 
-    // Модели
+
     function toggleModelForm() {
       const form = document.getElementById('model-form');
       form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -1387,7 +1385,7 @@
         return;
       }
 
-      // Получаем элементы формы
+
       const getFormValue = (name) => {
         const element = form.querySelector(`[name="${name}"]`);
         if (!element) {
@@ -1397,13 +1395,13 @@
         return element.value;
       };
 
-      // Добавляем параметры
+
       formData.append('project_id', projectId);
       formData.append('num_epoch', getFormValue('num_epoch') || 15);
       formData.append('batch_size', getFormValue('batch_size') || 32);
       formData.append('slide_window', getFormValue('slide_window') || 7);
 
-      // Для model-type-select (если он есть)
+
       const modelTypeSelect = document.querySelector('[name="model_type"]');
       if (modelTypeSelect) {
         formData.append('model_type', modelTypeSelect.value || 'LSTM');
@@ -1461,7 +1459,7 @@
             const response = await fetch(`/api/models/${modelId}/`);
             const model = await response.json();
 
-            // Словарь для преобразования типов моделей в читаемые названия
+
             const modelTypeNames = {
                 'lstm': 'LSTM',
                 'gru': 'GRU',
@@ -1471,7 +1469,7 @@
                 'tcn': 'TCN'
             };
 
-            // Получаем читаемое имя типа модели
+
             const modelTypeName = modelTypeNames[model.model_type] || model.model_type;
 
             detailsDiv.innerHTML = `
@@ -1553,7 +1551,7 @@
       setTimeout(() => alert.remove(), 3000);
     }
 
-    // Инициализация
+
     document.getElementById('project-select').addEventListener('change', function() {
       loadProjectData(this.value);
     });

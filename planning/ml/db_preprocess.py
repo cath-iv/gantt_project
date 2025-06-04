@@ -21,7 +21,7 @@ def convert_to_datetime(df, column='date'):
         df[column] = pd.to_datetime(df[column])
     return df
 def get_project_start_date(project_id):
-    # Вариант 1: Из первой записи прогресса
+
     first_progress = ProjectProgress.objects.filter(
         project_id=project_id
     ).order_by('date').first()
@@ -36,7 +36,6 @@ def get_last_7_days_data(project_id, n_input):
 
         start_date = last_date - timedelta(days=(n_input - 1))
 
-        # 1. Получаем данные прогресса
         progress_data = ProjectProgress.objects.filter(
             project_id=project_id,
             date__range=[start_date, last_date]
@@ -58,7 +57,6 @@ def get_last_7_days_data(project_id, n_input):
             'daily_progress': '%_per_day'
         }, inplace=True)
 
-        # 2. Обрабатываем погодные данные
         weather_data = Weather.objects.filter(date__range=[start_date, last_date])
         weather_df = pd.DataFrame.from_records(weather_data.values())
         weather_df = convert_to_datetime(weather_df)
@@ -69,8 +67,6 @@ def get_last_7_days_data(project_id, n_input):
             'wind_power': 'wind_force',
             'rainfall': 'RRR'
         }, inplace=True)
-
-        # 3. Обрабатываем данные персонала
         staff_data = Staff.objects.filter(
             date__date__range=[start_date, last_date]
         ).annotate(
@@ -95,40 +91,29 @@ def get_last_7_days_data(project_id, n_input):
             labour_df = pd.DataFrame(columns=['date', 'Labour', 'Non_Labour'])
 
         labour_df = convert_to_datetime(labour_df)
-
-        # 4. Объединяем данные
         result_df = progress_df.merge(weather_df, on='date', how='left')
         result_df = result_df.merge(labour_df, on='date', how='left')
         result_df.fillna(0, inplace=True)
 
-        # 5. Ключевые исправления для соответствия prepare_data
-        # 5.1 Сдвигаем значения AT_* на один день назад
         at_columns = [f'AT_{i}' for i in range(1, 16)]
         for col in at_columns:
             if col in result_df.columns:
                 result_df[col] = result_df[col].shift(1).fillna(0)
 
-        # 5.2 Пересчитываем days_since_start относительно начала проекта
-        project_start_date = get_project_start_date(project_id)  # Нужно реализовать эту функцию
+        project_start_date = get_project_start_date(project_id)
         project_start_ts = pd.Timestamp(project_start_date)
         result_df['days_since_start'] = (result_df['date'] - project_start_ts).dt.days
-
-        # 5.3 Добавляем day_of_week
         result_df['day_of_week'] = result_df['date'].dt.dayofweek
         result_df['day_of_year'] = result_df['date'].dt.day_of_year
-
-        # 5.4 Устанавливаем datetime индекс и удаляем колонку date
         result_df['datetime'] = pd.to_datetime(result_df['date'])
         result_df.set_index('datetime', inplace=True)
         result_df.drop(columns=['date'], inplace=True)
 
-        # 6. Гарантируем наличие всех AT_* колонок
         for i in range(1, 16):
             col = f'AT_{i}'
             if col not in result_df.columns:
                 result_df[col] = 0.0
 
-        # 7. Формируем финальные колонки
         FIXED_FEATURE_ORDER = [
             'CUM_%', '%_per_day', 'AT_1', 'AT_2', 'AT_3', 'AT_4', 'AT_5',
             'AT_6', 'AT_7', 'AT_8', 'AT_9', 'AT_10', 'AT_11', 'AT_12',
@@ -137,12 +122,10 @@ def get_last_7_days_data(project_id, n_input):
             'days_since_start', 'day_of_week'
         ]
 
-        # 1. Добавляем отсутствующие колонки
         for col in FIXED_FEATURE_ORDER:
             if col not in result_df.columns:
-                result_df[col] = 0  # или другое значение по умолчанию
+                result_df[col] = 0
 
-        # 2. Применяем строгий порядок
         result_df = result_df[FIXED_FEATURE_ORDER]
         print("7 дней:", result_df.columns)
         return result_df
@@ -152,7 +135,7 @@ def get_last_7_days_data(project_id, n_input):
         return pd.DataFrame()
 def get_full_project_data(project_id):
     try:
-        # 1. Получаем весь диапазон дат проекта
+
         date_range = ProjectProgress.objects.filter(
             project_id=project_id
         ).aggregate(
@@ -166,7 +149,6 @@ def get_full_project_data(project_id):
         start_date = date_range['min_date']
         end_date = date_range['max_date']
 
-        # 2. Получаем данные прогресса за весь период
         progress_data = ProjectProgress.objects.filter(
             project_id=project_id,
             date__range=[start_date, end_date]
@@ -187,8 +169,6 @@ def get_full_project_data(project_id):
             'cumulative_progress': 'CUM_%',
             'daily_progress': '%_per_day'
         }, inplace=True)
-
-        # 3. Обрабатываем погодные данные за весь период
         weather_data = Weather.objects.filter(date__range=[start_date, end_date])
         weather_df = pd.DataFrame.from_records(weather_data.values())
         weather_df = convert_to_datetime(weather_df)
@@ -200,7 +180,6 @@ def get_full_project_data(project_id):
             'rainfall': 'RRR'
         }, inplace=True)
 
-        # 4. Обрабатываем данные персонала за весь период
         staff_data = Staff.objects.filter(
             date__date__range=[start_date, end_date]
         ).annotate(
@@ -225,13 +204,9 @@ def get_full_project_data(project_id):
             labour_df = pd.DataFrame(columns=['date', 'Labour', 'Non_Labour'])
 
         labour_df = convert_to_datetime(labour_df)
-
-        # 5. Объединяем данные
         result_df = progress_df.merge(weather_df, on='date', how='left')
         result_df = result_df.merge(labour_df, on='date', how='left')
         result_df.fillna(0, inplace=True)
-
-        # 6. Ключевые обработки
         at_columns = [f'AT_{i}' for i in range(1, 16)]
         for col in at_columns:
             if col in result_df.columns:
@@ -240,14 +215,12 @@ def get_full_project_data(project_id):
         project_start_date = get_project_start_date(project_id)
         project_start_ts = pd.Timestamp(project_start_date)
         result_df['days_since_start'] = (result_df['date'] - project_start_ts).dt.days
-
         result_df['day_of_week'] = result_df['date'].dt.dayofweek
         result_df['day_of_year'] = result_df['date'].dt.day_of_year
         result_df['datetime'] = pd.to_datetime(result_df['date'])
         result_df.set_index('datetime', inplace=True)
         result_df.drop(columns=['date'], inplace=True)
 
-        # 7. Гарантируем наличие всех AT_* колонок
         for i in range(1, 16):
             col = f'AT_{i}'
             if col not in result_df.columns:
@@ -261,12 +234,10 @@ def get_full_project_data(project_id):
             'days_since_start', 'day_of_week'
         ]
 
-        # 1. Добавляем отсутствующие колонки
         for col in FIXED_FEATURE_ORDER:
             if col not in result_df.columns:
-                result_df[col] = 0  # или другое значение по умолчанию
+                result_df[col] = 0
 
-        # 2. Применяем строгий порядок
         result_df = result_df[FIXED_FEATURE_ORDER]
         print("Весь:", result_df.columns)
         return result_df

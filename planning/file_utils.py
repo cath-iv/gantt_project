@@ -8,11 +8,11 @@ def save_files_to_temp(files, model_id):
     temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp', str(model_id))
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Удаляем старые файлы если есть
+
     for old_file in os.listdir(temp_dir):
         os.remove(os.path.join(temp_dir, old_file))
 
-    # Сохраняем новые файлы с префиксами
+
     for file_key in files:
         file_obj = files[file_key]
         file_path = os.path.join(temp_dir, f"{file_key}_{file_obj.name}")
@@ -35,7 +35,6 @@ def get_temp_files(model_id):
         elif filename.startswith('weather_file_'):
             files['weather_file'] = os.path.join(temp_dir, filename)
 
-    # Проверяем что нашли все три файла
     if len(files) != 3:
         return None
 
@@ -43,7 +42,7 @@ def get_temp_files(model_id):
 
 
 def delete_temp_files(model_id):
-    """Удаляет временные файлы"""
+
     temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp', str(model_id))
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)

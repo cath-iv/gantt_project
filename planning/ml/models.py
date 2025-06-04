@@ -192,25 +192,16 @@ def to_supervised(train, n_input, n_out=7):
             y.append(data[in_end:out_end, 0])
         in_start += 1
     return np.array(X), np.array(y)
-'''
-def forecast(model, history, n_input):
-    data = np.array(history)
-    data = data.reshape((data.shape[0] * data.shape[1], data.shape[2]))
-    input_x = data[-n_input:, :]
-    input_x = input_x.reshape((1, input_x.shape[0], input_x.shape[1]))
-    yhat = model.model.predict(input_x, verbose=0)
-    return yhat[0]
-'''
+
 def forecast(model, initial_data, steps):
     predictions = []
     current_data = initial_data.copy()
 
     for _ in range(steps):
-        # Предсказываем следующий шаг
+
         next_step = model.predict(current_data)
         predictions.append(next_step[0, 0])
 
-        # Обновляем данные для следующего прогноза
         current_data = np.roll(current_data, -1, axis=1)
         current_data[0, -1, :] = next_step
 
@@ -254,13 +245,8 @@ def evaluate_model_performance(model, train_x, train_y, test_x, test_y):
         'mae': np.mean(np.abs(test_y - test_pred)),
     }
 
-
-import tempfile
-import os
-
-
 def model_to_bytes(model):
-    """Сохраняет модель с указанием явной временной директории"""
+
     temp_dir = os.path.join(os.path.dirname(__file__), 'temp_models')
     os.makedirs(temp_dir, exist_ok=True)
 
@@ -270,9 +256,8 @@ def model_to_bytes(model):
     with open(temp_path, 'rb') as f:
         model_bytes = f.read()
 
-    os.remove(temp_path)  # Удаляем временный файл
+    os.remove(temp_path)
     return model_bytes
-
 
 def save_to_db(model, scaler, project_id, profile_name, n_steps, n_features, n_outputs, num_epoch, batch_size, slide_window, model_type, train_metrics, framework_version):
     scaler_bytes = io.BytesIO()
@@ -304,27 +289,19 @@ def save_to_db(model, scaler, project_id, profile_name, n_steps, n_features, n_o
 import tempfile
 import os
 import shutil
-import cloudpickle as cp
+
 
 def load_from_db(model_id):
     db_model = Models.objects.get(id=model_id)
-
-    # Создаем временную директорию для надежной работы с файлами
     temp_dir = tempfile.mkdtemp()
     try:
-        # Сохраняем модель во временный файл
         model_path = os.path.join(temp_dir, f"model_{model_id}.keras")
         with open(model_path, 'wb') as f:
             f.write(db_model.model_data)
-
-        # Загружаем модель
         model = tf.keras.models.load_model(model_path)
-
-        # Загружаем скалер через joblib
         scaler_bytes = io.BytesIO(db_model.scaler_data)
         scaler = joblib.load(scaler_bytes)
 
         return model, scaler, db_model.model_config
     finally:
-        # Всегда удаляем временную директорию
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -164,7 +164,6 @@ def prepare_data(df, staff, weather):
     print("Эксель:", df_transposed.columns)
     return df_transposed
 
-
 def normalize_projects(projects):
     FIXED_FEATURE_ORDER = [
         'CUM_%', '%_per_day', 'AT_1', 'AT_2', 'AT_3', 'AT_4', 'AT_5',
@@ -173,28 +172,24 @@ def normalize_projects(projects):
         'Temp', 'P', 'relative_humidity', 'wind_force', 'day_of_year',
         'days_since_start', 'day_of_week'
     ]
-    # Фиксированный порядок признаков
+
     feature_order = FIXED_FEATURE_ORDER
 
-    # Приводим все проекты к единому формату
     common_projects = []
     for project in projects:
-        # Добавляем отсутствующие признаки
+
         for feature in feature_order:
             if feature not in project.columns:
                 project[feature] = 0.0
         project = project[feature_order]
         common_projects.append(project)
 
-    # Числовые признаки (исключаем целевую 'CUM_%' если нужно)
     numeric_cols = [col for col in FIXED_FEATURE_ORDER
-                    if pd.api.types.is_numeric_dtype(common_projects[0][col])]
+                   if pd.api.types.is_numeric_dtype(common_projects[0][col])]
 
-    # Масштабируем
     scaler = StandardScaler()
     scaler.fit(pd.concat(common_projects)[numeric_cols])
 
-    # Применяем масштабирование
     normalized_projects = []
     for project in common_projects:
         project_scaled = project.copy()
@@ -202,7 +197,6 @@ def normalize_projects(projects):
         normalized_projects.append(project_scaled)
 
     return normalized_projects, scaler, feature_order
-
 
 def generate_synthetic_project(real_project, noise_level=0.001, targets=None, strong_correlations=None):
     if real_project is None:
@@ -260,25 +254,19 @@ def preprocess_to_model(projects_list, n_input):
     normalized_projects, scaler, all_features = normalize_projects(common_projects)
     print("После нормализации:", normalized_projects[0].columns)
 
-    # 2. Подготовка данных для корреляционного анализа
     prepared_data = pd.concat(normalized_projects, axis=0)
 
-    # 3. Определение фичей и таргетов
-    features = ['RRR', 'relative_humidity', 'wind_force', 'Temp']  # ваши фичи
-    targets = [col for col in prepared_data.columns if col.startswith('AT_')]  # ваши таргеты
+    features = ['RRR', 'relative_humidity', 'wind_force', 'Temp']
+    targets = [col for col in prepared_data.columns if col.startswith('AT_')]
 
-    # 4. Проверка наличия всех фичей
     missing_features = [f for f in features if f not in prepared_data.columns]
     if missing_features:
         print(f"Предупреждение: Отсутствуют фичи {missing_features}")
         features = [f for f in features if f in prepared_data.columns]
 
-    # 5. Расчет корреляций
     correlation_matrix = prepared_data[features + targets].corr()
     strong_correlations = correlation_matrix[targets].loc[features]
 
-    # 6. Генерация синтетических данных (ИСПРАВЛЕННАЯ ЧАСТЬ)
-    # После нормализации
     synthetic_projects = []
     for project in normalized_projects:
         for _ in range(10):
@@ -288,13 +276,13 @@ def preprocess_to_model(projects_list, n_input):
                 targets=[col for col in FIXED_FEATURE_ORDER if col.startswith('AT_')],
                 strong_correlations=strong_correlations
             )
-            # Приводим к фиксированному порядку
+
             synthetic = synthetic[FIXED_FEATURE_ORDER]
             synthetic_projects.append(synthetic)
 
     print(f"Количество синтетических проектов: {len(synthetic_projects)}")
     print("После генерации:", synthetic_projects[0].columns)
-    # Разметка реальных и синтетических данных
+
     for p in normalized_projects:
         p['is_real'] = 1
     for p in synthetic_projects:
@@ -304,7 +292,6 @@ def preprocess_to_model(projects_list, n_input):
     print("Перед шафлом 0:", all_projects[0].columns)
     np.random.shuffle(all_projects)
 
-    # Подготовка данных для модели
     all_train_x, all_train_y, all_test_x, all_test_y = [], [], [], []
     for project in all_projects:
         try:
@@ -320,7 +307,6 @@ def preprocess_to_model(projects_list, n_input):
             print(f"Error processing project: {str(e)}")
             continue
 
-    # Объединение данных
     try:
         train_x_combined = np.concatenate(all_train_x, axis=0) if all_train_x else np.array([])
         train_y_combined = np.concatenate(all_train_y, axis=0) if all_train_y else np.array([])
@@ -333,27 +319,3 @@ def preprocess_to_model(projects_list, n_input):
         return train_x_combined, train_y_combined, test_x_combined, test_y_combined, scaler
     except Exception as e:
         raise ValueError(f"Error combining data: {str(e)}")
-
-
-'''
-verbose = 0 # по умолчанию?
-n_input = 7 # взяли с фронта, указал пользователь
-epochs = 25 # взяли с фронта, указал пользователь
-batch_size = 64 # взяли с фронта, указал пользователь
-df = pd.read_excel('test2.xlsx') # взяли с фронта, загрузил пользователь
-staff = pd.read_excel('staff.xlsx') # взяли с фронта, загрузил пользователь
-weather = pd.read_excel('weather.xls', date_format='%d.%m.%Y %H:%M') # взяли с фронта, загрузил пользователь
-model_types = ['LSTM', 'GRU', 'RNN', 'Bidirectional', 'CNN', 'TCN'] # на фронте доступные пользователю типы
-model_type = ['LSTM'] # взяли с фронта, выбрал пользователь
-last_7_days = [] # взяли из разных таблиц и как то преобразовали в нужный формат
-
-df = prepare_data(df, staff, weather)
-train_x_combined, train_y_combined, test_x_combined, test_y_combined, scaler = preprocess_to_model(df)
-model_creator = Model()
-model_instance = model_creator.create_model(model_type=model_type, n_timesteps=n_input, n_features=25)
-model, history = model_creator.train_model(model_instance, train_x_combined, train_y_combined, n_outputs=n_input)
-test_rmse, test_scores = model_creator.evaluate_model(model_instance, train_x_combined, train_y_combined, test_x_combined, test_y_combined)
-predicted_values = forecast(model_instance, last_7_days, n_input=7)
-model_id = save_to_db(model_instance.model, scaler, project_id, profile_name, n_steps, n_features, n_outputs, num_epoch, batch_size, slide_window, model_type, train_metrics, framework_version)
-loaded_model, loaded_scaler, config = load_from_db(model_id)
-'''

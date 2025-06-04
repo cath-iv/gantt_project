@@ -37,7 +37,6 @@ class TaskSerializer(serializers.ModelSerializer):
     def get_remains(self, obj):
         return obj.resource.remains
 
-# Сериализатор для TaskDependency
 class TaskDependencySerializer(serializers.ModelSerializer):
     task = TaskSerializer(read_only=True)
     dependent_task = TaskSerializer(read_only=True)
