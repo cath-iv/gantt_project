@@ -1,10 +1,16 @@
+import tempfile
+import traceback
+from venv import logger
+
 from rest_framework import viewsets, status, request
 from rest_framework.decorators import action
 from datetime import datetime, timezone
-import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
-
-from .ml.models import forecast, Model, model_to_bytes, evaluate_model_performance
+import joblib
+from io import BytesIO
+from .file_utils import get_temp_files, delete_temp_files
+from .file_utils import save_files_to_temp
+from .ml.db_preprocess import get_last_7_days_data, get_full_project_data
+from .ml.models import forecast, Model, model_to_bytes, evaluate_model_performance, load_from_db
 from .ml.preprocess import prepare_data, preprocess_to_model
 from rest_framework.serializers import ModelSerializer
 from django.shortcuts import render
@@ -212,7 +218,7 @@ def project_progress(request, project_id):
     try:
         # Пересчитываем прогресс перед получением данных
         from .services import calculate_project_progress
-        calculate_project_progress(project_id)  # <-- Добавьте эту строку
+        calculate_project_progress(project_id)
 
         progress_data = (
             ProjectProgress.objects
@@ -256,7 +262,6 @@ def get_tasks(request):
     tasks = Task.objects.filter(project_id=project_id).values('task_id', 'description')  # Используем task_id вместо id
     return Response(list(tasks))
 
-
 @api_view(['GET'])
 def get_projects(request):
     """Получение списка всех проектов"""
@@ -282,8 +287,6 @@ def project_tasks(request, project_id):
             for task in tasks
         ]
     })
-
-
 @api_view(['GET', 'PUT', 'DELETE'])
 def task_detail(request, task_id):
     """Управление конкретной задачей"""
@@ -303,8 +306,6 @@ def task_detail(request, task_id):
     elif request.method == 'DELETE':
         task.delete()
         return Response(status=204)
-
-
 @api_view(['POST'])
 def task_list(request):
     """Создание новой задачи"""
@@ -469,7 +470,6 @@ class ModelsViewSet(viewsets.ModelViewSet):
     queryset = Models.objects.all()
     serializer_class = ModelSerializer
 
-# Для получения деталей модели
 @api_view(['GET'])
 def model_detail(request, model_id):
     try:
@@ -489,19 +489,10 @@ def delete_model(request, model_id):
     except Models.DoesNotExist:
         return Response({'error': 'Model not found'}, status=404)
 
-def get_latest_project_data(project_id, n_steps):
-    """Получает последние данные проекта для прогноза"""
-    # Реализация получения данных
-    return np.array([...])  # Данные в форме [1, n_steps, n_features]
-
-def generate_future_dates(days):
-    """Генерирует даты для прогноза"""
-    today = datetime.now()
-    return [(today + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, days + 1)]
-
-
-from .file_utils import save_files_to_temp
-
+def generate_future_dates(last_known_date, days):
+    from datetime import timedelta
+    return [(last_known_date + timedelta(days=i)).strftime('%Y-%m-%d')
+            for i in range(1, days+1)]
 
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
@@ -510,7 +501,6 @@ def create_model(request):
         data = request.data
         files = request.FILES
 
-        # Проверяем наличие обязательных файлов
         required_files = ['project_file', 'staff_file', 'weather_file']
         for file_key in required_files:
             if file_key not in files:
@@ -539,11 +529,6 @@ def create_model(request):
     except Exception as e:
         return Response({'error': str(e)}, status=400)
 
-
-from .file_utils import get_temp_files, delete_temp_files
-
-
-
 @parser_classes([MultiPartParser, FormParser])
 @api_view(['POST'])
 def train_model(request, model_id):
@@ -571,9 +556,6 @@ def train_model(request, model_id):
             weather_data = pd.read_excel(file_paths['weather_file'], engine='openpyxl')
 
             print("Files read successfully")
-            print("Project data shape:", project_data.shape)
-            print("Staff data shape:", staff_data.shape)
-            print("Weather data shape:", weather_data.shape)
 
         except Exception as e:
             print("Error reading files:", str(e))
@@ -582,9 +564,10 @@ def train_model(request, model_id):
         # 4. Подготовка данных
         try:
             print("\nPreparing data...")
-            prepared_data = prepare_data(project_data, staff_data, weather_data)
+            open_project_data = get_full_project_data(model.project_id)
+            prepared_data = [prepare_data(project_data, staff_data, weather_data), open_project_data]
             print("Data prepared successfully")
-            print("Prepared data columns:", prepared_data.columns.tolist())
+
 
         except Exception as e:
             print("Error preparing data:", str(e))
@@ -593,7 +576,12 @@ def train_model(request, model_id):
         # Преобразование данных для модели
         train_x_combined, train_y_combined, test_x_combined, test_y_combined, scaler = preprocess_to_model(prepared_data, model.slide_window)
         print("Train data prepared successfully")
-
+        feature_names = prepared_data[0].columns.tolist()  # Получаем список всех признаков
+        model_config = {
+            'feature_names': feature_names,
+            'n_features': len(feature_names),
+            'target_feature': 'CUM_%'  # Указываем целевую переменную
+        }
         model_creator = Model()
         model_instance = model_creator.create_model(
             model_type=model.model_type,
@@ -629,10 +617,8 @@ def train_model(request, model_id):
                                             test_y_combined)
 
         try:
-            # В train_model:
             buffer = model_to_bytes(model_instance.model)
             model.model_data = buffer
-
             model.train_metrics = {
                 'test_rmse': test_rmse,
                 'test_scores': test_scores,
@@ -641,6 +627,12 @@ def train_model(request, model_id):
                    'mape': metrics['mape'],
                }
             }
+            scaler_buffer = BytesIO()
+            joblib.dump(scaler, scaler_buffer)
+            scaler_bytes = scaler_buffer.getvalue()
+            model.scaler_data = scaler_bytes
+            model.model_config = model_config
+
             model.save()
             delete_temp_files(model_id)
         except Exception as e:
@@ -658,31 +650,107 @@ def train_model(request, model_id):
         return Response({'error': str(e)}, status=500)
 
 
-# Для прогнозирования
+import joblib
+from io import BytesIO
+import numpy as np
+
+def calculate_mape(actual, predicted):
+    """Рассчитывает Mean Absolute Percentage Error (MAPE)"""
+    actual, predicted = np.array(actual), np.array(predicted)
+    # Фильтруем нулевые значения, чтобы избежать деления на ноль
+    mask = actual != 0
+    if sum(mask) == 0:
+        return None
+    return np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100
+
 @api_view(['POST'])
 def model_predict(request, model_id):
     try:
+        # 1. Загрузка модели, скалера и конфигурации
+        loaded_model, scaler, model_config = load_from_db(model_id)
         model = Models.objects.get(pk=model_id)
 
-        # Загрузка модели из БД
-        buffer = io.BytesIO(model.model_data)
-        loaded_model = tf.keras.models.load_model(buffer)
+        # 2. Получение данных (7 дней)
+        last_data = get_last_7_days_data(model.project_id, model.slide_window)
 
-        # Получение данных для прогноза
-        last_7_days = get_latest_project_data(model.project_id, model.slide_window)
+        # 3. Получаем список признаков из конфигурации
+        feature_names = model_config.get('feature_names', [])
+        if not feature_names:
+            raise ValueError("Feature names not found in model config")
+        # В пункте 3 после получения feature_names из конфигурации:
+        if 'is_real' not in feature_names:
+            feature_names.append('is_real')
 
-        # Прогнозирование
-        predicted_values = forecast(loaded_model, last_7_days, n_input=model.slide_window)
-        predicted_values = [min(100, max(0, x[0])) for x in predicted_values]  # Ограничение 0-100%
+        # 4. Добавляем отсутствующие признаки
+        for feature in feature_names:
+            if feature not in last_data.columns:
+                if feature == 'is_real':
+                    last_data[feature] = 1  # Для реальных данных
+                else:
+                    last_data[feature] = 0.0  # Для остальных
+        # После пункта 4 (добавления отсутствующих признаков) и перед пунктом 5:
+        if 'is_real' not in last_data.columns:
+            last_data['is_real'] = 1  # 1 для реальных данных, 0 для синтетических
+        # 5. Упорядочиваем признаки как при обучении
+        X = last_data[feature_names]
 
-        # Форматирование дат
-        dates = generate_future_dates(model.slide_window)
+        # 6. Масштабируем только числовые признаки (кроме is_real)
+        numeric_features = [f for f in feature_names if f != 'is_real']
+        X[numeric_features] = scaler.transform(X[numeric_features])
+
+        # 7. Изменяем форму для модели (1, 7, n_features)
+        X = X.values.reshape((1, model.slide_window, -1))
+
+        # 8. Проверка совместимости
+        if X.shape[2] != loaded_model.input_shape[-1]:
+            raise ValueError(
+                f"Shape mismatch: Model expects {loaded_model.input_shape[-1]} features, "
+                f"got {X.shape[2]}. Features: {feature_names}"
+            )
+
+        # 9-12. Прогнозирование и обработка результатов
+        horizon = model.slide_window
+        predictions = []
+        current_data = X.copy()  # Копируем исходные данные
+
+        for _ in range(horizon):
+            # Получаем предсказание
+            pred = loaded_model.predict(current_data)
+
+            # Сохраняем только целевое значение (CUM_%)
+            if pred.ndim == 3:  # Если модель возвращает 3D тензор
+                pred_value = pred[0, 0, 0]
+            else:
+                pred_value = pred[0, 0]
+            predictions.append(pred_value)
+
+            # Обновляем данные для следующего шага
+            current_data = np.roll(current_data, -1, axis=1)
+            target_idx = feature_names.index(model_config['target_feature'])
+            current_data[0, -1, target_idx] = pred_value
+
+        # Обратное преобразование прогнозов
+        dummy = np.zeros((len(predictions), len(scaler.feature_names_in_)))
+        target_scaler_idx = list(scaler.feature_names_in_).index(model_config['target_feature'])
+        dummy[:, target_scaler_idx] = predictions
+        predictions = scaler.inverse_transform(dummy)[:, target_scaler_idx]
+
+        # Постобработка и форматирование результатов
+        predictions = np.clip(predictions, 0, 100).tolist()
+        last_date = pd.to_datetime(last_data.index[-1]).date()
+        dates = generate_future_dates(last_date, horizon)
 
         return Response({
             'status': 'success',
-            'forecast': predicted_values,
-            'dates': dates
+            'forecast': [round(float(x), 2) for x in predictions],
+            'dates': [str(date) for date in dates],
+            'features_used': feature_names,
+            'target_feature': model_config['target_feature']
         })
-    except Exception as e:
-        return Response({'error': str(e)}, status=500)
 
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        return Response({
+            'error': f"Prediction failed: {str(e)}",
+            'traceback': traceback.format_exc()
+        }, status=500)

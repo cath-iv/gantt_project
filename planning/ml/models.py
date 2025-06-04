@@ -3,6 +3,8 @@ import pickle
 import tempfile
 from datetime import timezone
 import random
+
+import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -190,7 +192,7 @@ def to_supervised(train, n_input, n_out=7):
             y.append(data[in_end:out_end, 0])
         in_start += 1
     return np.array(X), np.array(y)
-
+'''
 def forecast(model, history, n_input):
     data = np.array(history)
     data = data.reshape((data.shape[0] * data.shape[1], data.shape[2]))
@@ -198,7 +200,21 @@ def forecast(model, history, n_input):
     input_x = input_x.reshape((1, input_x.shape[0], input_x.shape[1]))
     yhat = model.model.predict(input_x, verbose=0)
     return yhat[0]
+'''
+def forecast(model, initial_data, steps):
+    predictions = []
+    current_data = initial_data.copy()
 
+    for _ in range(steps):
+        # Предсказываем следующий шаг
+        next_step = model.predict(current_data)
+        predictions.append(next_step[0, 0])
+
+        # Обновляем данные для следующего прогноза
+        current_data = np.roll(current_data, -1, axis=1)
+        current_data[0, -1, :] = next_step
+
+    return predictions
 def evaluate_forecasts(actual, predicted):
     scores = list()
     for i in range(actual.shape[1]):
@@ -285,17 +301,30 @@ def save_to_db(model, scaler, project_id, profile_name, n_steps, n_features, n_o
     return db_model.id
 
 
+import tempfile
+import os
+import shutil
+import cloudpickle as cp
+
 def load_from_db(model_id):
     db_model = Models.objects.get(id=model_id)
 
+    # Создаем временную директорию для надежной работы с файлами
+    temp_dir = tempfile.mkdtemp()
+    try:
+        # Сохраняем модель во временный файл
+        model_path = os.path.join(temp_dir, f"model_{model_id}.keras")
+        with open(model_path, 'wb') as f:
+            f.write(db_model.model_data)
 
-    model_bytes = io.BytesIO(db_model.model_data)
-    with tempfile.NamedTemporaryFile(suffix='.keras') as tmp:
-        tmp.write(model_bytes.getvalue())
-        tmp.flush()
-        model = tf.keras.models.load_model(tmp.name)
+        # Загружаем модель
+        model = tf.keras.models.load_model(model_path)
 
-    scaler_bytes = io.BytesIO(db_model.scaler_data)
-    scaler = pickle.load(scaler_bytes)
+        # Загружаем скалер через joblib
+        scaler_bytes = io.BytesIO(db_model.scaler_data)
+        scaler = joblib.load(scaler_bytes)
 
-    return model, scaler, db_model.model_config
+        return model, scaler, db_model.model_config
+    finally:
+        # Всегда удаляем временную директорию
+        shutil.rmtree(temp_dir, ignore_errors=True)

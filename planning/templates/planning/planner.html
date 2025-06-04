@@ -1314,8 +1314,13 @@
       const resultsDiv = document.getElementById('prediction-results');
       resultsDiv.innerHTML = `
         <div class="card mt-3">
-          <div class="card-header">Прогноз на 7 дней</div>
+          <div class="card-header">Прогноз на ${data.forecast.length} дней</div>
           <div class="card-body">
+            ${data.mape ? `
+              <div class="alert alert-info">
+                Точность прогноза (MAPE): ${data.mape.toFixed(2)}%
+              </div>
+            ` : ''}
             <table class="table table-striped">
               <thead>
                 <tr>
@@ -1399,7 +1404,7 @@
       formData.append('slide_window', getFormValue('slide_window') || 7);
 
       // Для model-type-select (если он есть)
-      const modelTypeSelect = document.getElementById('model-type-select');
+      const modelTypeSelect = document.querySelector('[name="model_type"]');
       if (modelTypeSelect) {
         formData.append('model_type', modelTypeSelect.value || 'LSTM');
       }

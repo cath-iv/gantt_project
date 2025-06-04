@@ -1,7 +1,10 @@
-def calculate_project_progress(project_id):
-    from django.db import transaction
-    from .models import Task, ResourceRemains, ProjectProgress, TaskStandards
+from collections import defaultdict
+from django.db import transaction
+from django.db.models import Sum
+from .models import Task, ResourceRemains, ProjectProgress, TaskStandards
 
+
+def calculate_project_progress(project_id):
     with transaction.atomic():
         # 1. Очистка старых данных
         ProjectProgress.objects.filter(project_id=project_id).delete()
@@ -12,56 +15,102 @@ def calculate_project_progress(project_id):
             for ts in TaskStandards.objects.filter(project_id=project_id)
         }
 
-        # 3. Получаем задачи с ресурсами
+        # 3. Получаем задачи с ресурсами и создаем словарь
         tasks = Task.objects.filter(project_id=project_id).select_related('resource')
+        task_dict = {t.task_id: t for t in tasks}
 
-        # 4. Рассчитываем общий вес
-        total_weight = sum(
-            (standards.get(task.task_id, (0, 0))[0] or 0) + 
-            (standards.get(task.task_id, (0, 0))[1] or 0)
-            for task in tasks
-        )
+        # 4. Рассчитываем общий вес и веса по категориям
+        total_weight = 0
+        category_totals = defaultdict(float)
+
+        for task in tasks:
+            man_hours, machine_hours = standards.get(task.task_id, (0, 0))
+            task_weight = (man_hours or 0) + (machine_hours or 0)
+            total_weight += task_weight
+            category_totals[task.work_type] += task_weight
 
         if total_weight <= 0:
             return 0
 
-        # 5. Получаем фактические выполнения
+        # 5. Получаем фактические выполнения с группировкой по ЗАДАЧЕ (а не типу работ)
         remains = ResourceRemains.objects.filter(
             task__project_id=project_id,
             output__gt=0
-        ).select_related('task')
+        ).values('date', 'task_id').annotate(total_output=Sum('output'))
 
-        # 6. Агрегация по дням
-        daily_stats = {}
+        # 6. Инициализация структур данных
+        daily_stats = defaultdict(lambda: {
+            'progress': 0,
+            'man_hours': 0,
+            'machine_hours': 0,
+            'categories': defaultdict(float)
+        })
+
+        # 7. Заполнение daily_stats с учетом КАЖДОЙ ЗАДАЧИ отдельно
         for r in remains:
-            date_str = r.date.strftime('%Y-%m-%d')
-            task = r.task
-            task_std = standards.get(task.task_id, (0, 0))
+            date_str = r['date'].strftime('%Y-%m-%d')
+            task_id = r['task_id']
+            output = r['total_output']
 
-            if date_str not in daily_stats:
-                daily_stats[date_str] = {'progress': 0, 'man_hours': 0, 'machine_hours': 0}
+            task = task_dict.get(task_id)
+            if not task or not task.resource:
+                continue
+
+            # Получаем норматив для конкретной задачи
+            man_hours_std, machine_hours_std = standards.get(task_id, (0, 0))
+            total_std = man_hours_std + machine_hours_std
 
             if task.resource.quantity > 0:
-                ratio = r.output / task.resource.quantity
-                daily_stats[date_str]['progress'] += ratio * (task_std[0] + task_std[1])
-                daily_stats[date_str]['man_hours'] += ratio * task_std[0]
-                daily_stats[date_str]['machine_hours'] += ratio * task_std[1]
+                ratio = min(output / task.resource.quantity, 1.0)  # Не более 100% на задачу
 
-        # 7. Сохранение результатов
-        cumulative = 0
+                # Обновляем статистику
+                daily_stats[date_str]['progress'] += ratio * total_std
+                daily_stats[date_str]['man_hours'] += ratio * man_hours_std
+                daily_stats[date_str]['machine_hours'] += ratio * machine_hours_std
+                daily_stats[date_str]['categories'][task.work_type] += ratio * total_std
+
+        # 8. Инициализация кумулятивных значений по категориям
+        cumulative_category = {category: 0.0 for category in category_totals}
         records = []
-        for date_str in sorted(daily_stats.keys()):
-            daily_progress = daily_stats[date_str]['progress'] / total_weight
-            cumulative += daily_progress
-            records.append(ProjectProgress(
+        cumulative_total = 0
+
+        # Сортируем даты в хронологическом порядке
+        sorted_dates = sorted(daily_stats.keys())
+
+        for date_str in sorted_dates:
+            data = daily_stats[date_str]
+
+            # Общий прогресс
+            daily_progress = data['progress'] / total_weight
+            cumulative_total += daily_progress
+
+            # Прогресс по категориям (только для существующих категорий)
+            for work_type, contribution in data['categories'].items():
+                # Пропускаем категории без веса
+                if work_type not in category_totals or category_totals[work_type] <= 0:
+                    continue
+
+                # Доля выполнения от общего объема категории
+                daily_ratio = contribution / category_totals[work_type]
+                cumulative_category[work_type] += daily_ratio
+
+            # Создаем запись прогресса
+            progress_record = ProjectProgress(
                 project_id=project_id,
                 date=date_str,
                 daily_progress=daily_progress,
-                cumulative_progress=cumulative,
-                man_hours=daily_stats[date_str]['man_hours'],
-                machine_hours=daily_stats[date_str]['machine_hours']
-            ))
+                cumulative_progress=cumulative_total,
+                man_hours=data['man_hours'],
+                machine_hours=data['machine_hours']
+            )
 
+            # Устанавливаем значения для всех категорий проекта
+            for work_type, cum_value in cumulative_category.items():
+                setattr(progress_record, work_type, cum_value)
+
+            records.append(progress_record)
+
+        # 9. Сохранение результатов
         ProjectProgress.objects.bulk_create(records)
         return len(records)
 

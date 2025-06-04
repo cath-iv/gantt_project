@@ -153,54 +153,96 @@ def prepare_data(df, staff, weather):
     df_transposed.drop(columns=['Date'], inplace=True)
     df_transposed['day_of_week'] = df_transposed.index.dayofweek
     df_transposed.fillna(0, inplace=True)
+    FIXED_FEATURE_ORDER = [
+        'CUM_%', '%_per_day', 'AT_1', 'AT_2', 'AT_3', 'AT_4', 'AT_5',
+        'AT_6', 'AT_7', 'AT_8', 'AT_9', 'AT_10', 'AT_11', 'AT_12',
+        'AT_13', 'AT_14', 'AT_15', 'Labour', 'Non_Labour', 'RRR',
+        'Temp', 'P', 'relative_humidity', 'wind_force', 'day_of_year',
+        'days_since_start', 'day_of_week'
+    ]
+    df_transposed = df_transposed[FIXED_FEATURE_ORDER]
+    print("Эксель:", df_transposed.columns)
     return df_transposed
+
+
 def normalize_projects(projects):
-    all_data = pd.concat(projects)
-    numeric_cols = all_data.select_dtypes(include=['float64', 'int64']).columns
-    cols_order = ['CUM_%'] + [col for col in numeric_cols if col != 'CUM_%'] # CUM_% - target
-    numeric_cols = cols_order
+    FIXED_FEATURE_ORDER = [
+        'CUM_%', '%_per_day', 'AT_1', 'AT_2', 'AT_3', 'AT_4', 'AT_5',
+        'AT_6', 'AT_7', 'AT_8', 'AT_9', 'AT_10', 'AT_11', 'AT_12',
+        'AT_13', 'AT_14', 'AT_15', 'Labour', 'Non_Labour', 'RRR',
+        'Temp', 'P', 'relative_humidity', 'wind_force', 'day_of_year',
+        'days_since_start', 'day_of_week'
+    ]
+    # Фиксированный порядок признаков
+    feature_order = FIXED_FEATURE_ORDER
 
-    scaler = StandardScaler()
-    scaler.fit(all_data[numeric_cols])
-
-    normalized_projects = []
+    # Приводим все проекты к единому формату
+    common_projects = []
     for project in projects:
-        scaled_values = scaler.transform(project[numeric_cols])
-        df_scaled = pd.DataFrame(scaled_values,
-                                columns=numeric_cols,
-                                index=project.index)
-        normalized_projects.append(df_scaled)
-    return normalized_projects, scaler
+        # Добавляем отсутствующие признаки
+        for feature in feature_order:
+            if feature not in project.columns:
+                project[feature] = 0.0
+        project = project[feature_order]
+        common_projects.append(project)
 
-def generate_synthetic_project(real_project, noise_level=0.001, targets = None, strong_correlations = None):
+    # Числовые признаки (исключаем целевую 'CUM_%' если нужно)
+    numeric_cols = [col for col in FIXED_FEATURE_ORDER
+                    if pd.api.types.is_numeric_dtype(common_projects[0][col])]
+
+    # Масштабируем
+    scaler = StandardScaler()
+    scaler.fit(pd.concat(common_projects)[numeric_cols])
+
+    # Применяем масштабирование
+    normalized_projects = []
+    for project in common_projects:
+        project_scaled = project.copy()
+        project_scaled[numeric_cols] = scaler.transform(project[numeric_cols])
+        normalized_projects.append(project_scaled)
+
+    return normalized_projects, scaler, feature_order
+
+
+def generate_synthetic_project(real_project, noise_level=0.001, targets=None, strong_correlations=None):
+    if real_project is None:
+        raise ValueError("Реальный проект не может быть None")
+    if not isinstance(targets, list):
+        raise ValueError("Targets должен быть списком")
+    if strong_correlations is None:
+        raise ValueError("Не передана корреляционная матрица")
+
     synthetic = real_project.copy()
+
     for activity in targets:
+        if activity not in strong_correlations:
+            continue
+
         influencing_factors = strong_correlations[activity][
             abs(strong_correlations[activity]) > 0.001
-        ].index.tolist()
-        if influencing_factors:
-            for factor in influencing_factors:
+            ].index.tolist()
+
+        for factor in influencing_factors:
+            if factor in synthetic.columns:
                 corr = strong_correlations.loc[factor, activity]
                 noise = np.random.normal(0, noise_level, len(synthetic))
                 synthetic[activity] += corr * noise * synthetic[factor]
 
     return synthetic
 
-
-def preprocess_to_model(df, n_input):
-    # Проверка входных параметров
-    if n_input is None or not isinstance(n_input, int) or n_input <= 0:
-        raise ValueError(f"Invalid n_input value: {n_input}. Must be positive integer")
-
+def preprocess_to_model(projects_list, n_input):
+    FIXED_FEATURE_ORDER = [
+        'CUM_%', '%_per_day', 'AT_1', 'AT_2', 'AT_3', 'AT_4', 'AT_5',
+        'AT_6', 'AT_7', 'AT_8', 'AT_9', 'AT_10', 'AT_11', 'AT_12',
+        'AT_13', 'AT_14', 'AT_15', 'Labour', 'Non_Labour', 'RRR',
+        'Temp', 'P', 'relative_humidity', 'wind_force', 'day_of_year',
+        'days_since_start', 'day_of_week'
+    ]
     np.random.seed(42)
     tf.random.set_seed(42)
     random.seed(42)
 
-    # Проверка и подготовка данных
-    if df is None or df.empty:
-        raise ValueError("Input DataFrame is empty or None")
-
-    projects = [df]
+    projects = projects_list
     all_features = set()
     for project in projects:
         all_features.update(project.columns)
@@ -213,37 +255,45 @@ def preprocess_to_model(df, n_input):
         project = project[list(all_features)]
         common_projects.append(project)
 
-    # Нормализация
-    normalized_projects, scaler = normalize_projects(common_projects)
+
+    print("До нормализации:", projects[0].columns)
+    normalized_projects, scaler, all_features = normalize_projects(common_projects)
+    print("После нормализации:", normalized_projects[0].columns)
+
+    # 2. Подготовка данных для корреляционного анализа
     prepared_data = pd.concat(normalized_projects, axis=0)
 
-    # Анализ корреляций
-    features = ['RRR', 'relative_humidity', 'wind_force', 'Temp']
-    targets = [col for col in prepared_data.columns if col.startswith('AT_')]
+    # 3. Определение фичей и таргетов
+    features = ['RRR', 'relative_humidity', 'wind_force', 'Temp']  # ваши фичи
+    targets = [col for col in prepared_data.columns if col.startswith('AT_')]  # ваши таргеты
 
-    # Проверка наличия фичей
+    # 4. Проверка наличия всех фичей
     missing_features = [f for f in features if f not in prepared_data.columns]
     if missing_features:
-        print(f"Warning: Missing features {missing_features}")
+        print(f"Предупреждение: Отсутствуют фичи {missing_features}")
         features = [f for f in features if f in prepared_data.columns]
 
+    # 5. Расчет корреляций
     correlation_matrix = prepared_data[features + targets].corr()
     strong_correlations = correlation_matrix[targets].loc[features]
 
-    # Генерация синтетических данных
+    # 6. Генерация синтетических данных (ИСПРАВЛЕННАЯ ЧАСТЬ)
+    # После нормализации
     synthetic_projects = []
     for project in normalized_projects:
         for _ in range(10):
             synthetic = generate_synthetic_project(
                 project,
-                noise_level=0.001,  # Добавлен отсутствующий параметр
-                targets=targets,
+                noise_level=0.001,
+                targets=[col for col in FIXED_FEATURE_ORDER if col.startswith('AT_')],
                 strong_correlations=strong_correlations
             )
+            # Приводим к фиксированному порядку
+            synthetic = synthetic[FIXED_FEATURE_ORDER]
             synthetic_projects.append(synthetic)
 
     print(f"Количество синтетических проектов: {len(synthetic_projects)}")
-
+    print("После генерации:", synthetic_projects[0].columns)
     # Разметка реальных и синтетических данных
     for p in normalized_projects:
         p['is_real'] = 1
@@ -251,6 +301,7 @@ def preprocess_to_model(df, n_input):
         p['is_real'] = 0
 
     all_projects = normalized_projects + synthetic_projects
+    print("Перед шафлом 0:", all_projects[0].columns)
     np.random.shuffle(all_projects)
 
     # Подготовка данных для модели

@@ -62,6 +62,21 @@ class ProjectProgress(models.Model):
     cumulative_progress = models.FloatField(default=0)
     man_hours = models.FloatField(default=0)
     machine_hours = models.FloatField(default=0)
+    AT_1 = models.FloatField(default=0)
+    AT_2 = models.FloatField(default=0)
+    AT_3 = models.FloatField(default=0)
+    AT_4 = models.FloatField(default=0)
+    AT_5 = models.FloatField(default=0)
+    AT_6 = models.FloatField(default=0)
+    AT_7 = models.FloatField(default=0)
+    AT_8 = models.FloatField(default=0)
+    AT_9 = models.FloatField(default=0)
+    AT_10 = models.FloatField(default=0)
+    AT_11 = models.FloatField(default=0)
+    AT_12 = models.FloatField(default=0)
+    AT_13 = models.FloatField(default=0)
+    AT_14 = models.FloatField(default=0)
+    AT_15 = models.FloatField(default=0)
 
 
     class Meta:
@@ -220,6 +235,7 @@ class Models(models.Model):
     train_metrics = models.JSONField(default=dict)
     framework_version = models.CharField(max_length=255, default='2.12.0')
     model_data = models.BinaryField()
+    scaler_data = models.BinaryField(null=True, blank=True)
 
     def __str__(self):
         return self.profile_name

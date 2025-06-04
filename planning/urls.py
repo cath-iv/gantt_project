@@ -32,7 +32,7 @@ urlpatterns = [
     #path('api/models/', views.model_list),
     path('api/models/<int:pk>/', views.model_detail),
    # path('api/models/<int:pk>/train/', views.train_model),
-    #path('api/models/<int:pk>/predict/', views.make_prediction),
+    path('api/models/<int:model_id>/predict/', views.model_predict, name='predict-model'),
     path('api/models/', views.create_model, name='create-model'),
     path('api/models/<int:model_id>/train/', views.train_model, name='train-model'),
     path('api/models/<int:model_id>/delete/', views.delete_model, name='delete_model'),
